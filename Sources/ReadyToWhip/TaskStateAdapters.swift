@@ -7,10 +7,18 @@ struct AppRuntimeContext {
     let processes: [ProcessSnapshot]
 }
 
+protocol ToolStateAdapter {
+    func detect(context: AppRuntimeContext) -> [AIActivity]
+}
+
 enum TaskStateAdapters {
+    static let adapters: [ToolStateAdapter] = [
+        CodexTaskStateAdapter(),
+        AntigravityTaskStateAdapter()
+    ]
+
     static func detect(context: AppRuntimeContext) -> [AIActivity] {
-        CodexTaskStateAdapter().detect(appPID: context.codexPID)
-            + AntigravityTaskStateAdapter().detect(appPID: context.antigravityPID, processes: context.processes)
+        adapters.flatMap { $0.detect(context: context) }
     }
 }
 
@@ -22,7 +30,7 @@ private struct CodexThreadRow {
     let updatedAt: TimeInterval
 }
 
-private final class CodexTaskStateAdapter {
+private final class CodexTaskStateAdapter: ToolStateAdapter {
     private var stateDB: String {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex/state_5.sqlite").path
     }
@@ -30,7 +38,8 @@ private final class CodexTaskStateAdapter {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex/logs_2.sqlite").path
     }
 
-    func detect(appPID: Int32?) -> [AIActivity] {
+    func detect(context: AppRuntimeContext) -> [AIActivity] {
+        let appPID = context.codexPID
         guard FileManager.default.fileExists(atPath: stateDB) else { return [] }
 
         let threads = latestThreads()
@@ -172,12 +181,14 @@ private final class CodexTaskStateAdapter {
     }
 }
 
-private final class AntigravityTaskStateAdapter {
+private final class AntigravityTaskStateAdapter: ToolStateAdapter {
     private var supportRoot: String {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Antigravity").path
     }
 
-    func detect(appPID: Int32?, processes: [ProcessSnapshot]) -> [AIActivity] {
+    func detect(context: AppRuntimeContext) -> [AIActivity] {
+        let appPID = context.antigravityPID
+        let processes = context.processes
         guard appPID != nil || FileManager.default.fileExists(atPath: supportRoot) else {
             return []
         }
