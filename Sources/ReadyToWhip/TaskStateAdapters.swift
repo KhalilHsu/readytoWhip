@@ -23,8 +23,12 @@ private struct CodexThreadRow {
 }
 
 private final class CodexTaskStateAdapter {
-    private let stateDB = "/Users/khalil/.codex/state_5.sqlite"
-    private let logsDB = "/Users/khalil/.codex/logs_2.sqlite"
+    private var stateDB: String {
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex/state_5.sqlite").path
+    }
+    private var logsDB: String {
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex/logs_2.sqlite").path
+    }
 
     func detect(appPID: Int32?) -> [AIActivity] {
         guard FileManager.default.fileExists(atPath: stateDB) else { return [] }
@@ -169,7 +173,9 @@ private final class CodexTaskStateAdapter {
 }
 
 private final class AntigravityTaskStateAdapter {
-    private let supportRoot = "/Users/khalil/Library/Application Support/Antigravity"
+    private var supportRoot: String {
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Antigravity").path
+    }
 
     func detect(appPID: Int32?, processes: [ProcessSnapshot]) -> [AIActivity] {
         guard appPID != nil || FileManager.default.fileExists(atPath: supportRoot) else {
