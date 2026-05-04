@@ -226,6 +226,9 @@ private final class AntigravityTaskStateAdapter {
             )
         }
         .filter { !$0.name.isEmpty }
+        // Only surface workspaces touched in the last 2 hours to avoid showing
+        // all historical projects a user has ever opened in Antigravity.
+        .filter { Date().timeIntervalSince($0.modifiedAt) <= 2 * 60 * 60 }
     }
 
     private func latestLogSignal() -> AntigravityLogSignal {
@@ -300,13 +303,16 @@ private final class AntigravityTaskStateAdapter {
         let workspaceAge = Date().timeIntervalSince(workspace.modifiedAt)
         let logAge = signal.date.map { Date().timeIntervalSince($0) } ?? .greatestFiniteMagnitude
 
-        if logAge <= 2 * 60 && signal.containsFatalError && process == nil {
+        // Only mark failed if BOTH the log and the workspace are fresh,
+        // preventing a single global log signal from tainting old workspaces.
+        if logAge <= 2 * 60 && workspaceAge <= 5 * 60 && signal.containsFatalError && process == nil {
             return .failed
         }
         if let process, process.cpu >= 0.5 {
             return .working
         }
-        if process != nil || workspaceAge <= 10 * 60 {
+        // Tightened from 10 min → 5 min to reduce ghost entry duration.
+        if process != nil || workspaceAge <= 5 * 60 {
             return .waiting
         }
         return .idle
