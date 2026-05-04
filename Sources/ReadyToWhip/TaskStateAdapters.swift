@@ -8,7 +8,7 @@ struct AppRuntimeContext {
     let processes: [ProcessSnapshot]
 }
 
-protocol ToolStateAdapter {
+protocol ToolStateAdapter: Sendable {
     func detect(context: AppRuntimeContext) -> [AIActivity]
 }
 
@@ -31,7 +31,7 @@ private struct CodexThreadRow {
     let updatedAt: TimeInterval
 }
 
-private final class CodexTaskStateAdapter: ToolStateAdapter {
+private final class CodexTaskStateAdapter: ToolStateAdapter, @unchecked Sendable {
     private var stateDB: String {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex/state_5.sqlite").path
     }
@@ -182,7 +182,7 @@ private final class CodexTaskStateAdapter: ToolStateAdapter {
     }
 }
 
-private final class AntigravityTaskStateAdapter: ToolStateAdapter {
+private final class AntigravityTaskStateAdapter: ToolStateAdapter, @unchecked Sendable {
     private var supportRoot: String {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Antigravity").path
     }
