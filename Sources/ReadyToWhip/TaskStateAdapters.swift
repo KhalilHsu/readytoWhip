@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import SQLite3
 
 struct AppRuntimeContext {
     let codexPID: Int32?
@@ -371,24 +372,35 @@ private struct AntigravityLogSignal {
 }
 
 private func runSQLite(database: String, query: String) -> [String] {
-    let process = Process()
-    process.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
-    process.arguments = ["-readonly", "-separator", "\t", database, query]
-
-    let pipe = Pipe()
-    process.standardOutput = pipe
-    process.standardError = Pipe()
-
-    do {
-        try process.run()
-    } catch {
+    var db: OpaquePointer?
+    guard sqlite3_open_v2(database, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+        sqlite3_close(db)
         return []
     }
+    defer { sqlite3_close(db) }
 
-    let data = pipe.fileHandleForReading.readDataToEndOfFile()
-    process.waitUntilExit()
-    guard let output = String(data: data, encoding: .utf8) else { return [] }
-    return output.split(separator: "\n").map(String.init)
+    var statement: OpaquePointer?
+    guard sqlite3_prepare_v2(db, query, -1, &statement, nil) == SQLITE_OK else {
+        return []
+    }
+    defer { sqlite3_finalize(statement) }
+
+    var results: [String] = []
+    let columnCount = sqlite3_column_count(statement)
+    
+    while sqlite3_step(statement) == SQLITE_ROW {
+        var row: [String] = []
+        for i in 0..<columnCount {
+            if let cString = sqlite3_column_text(statement, i) {
+                row.append(String(cString: cString))
+            } else {
+                row.append("")
+            }
+        }
+        results.append(row.joined(separator: "\t"))
+    }
+    
+    return results
 }
 
 private func filePath(from uri: String?) -> String? {
