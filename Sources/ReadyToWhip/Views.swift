@@ -14,7 +14,7 @@ struct FloatingWidgetView: View {
                 activityList
             }
         }
-        .frame(width: store.isExpanded ? 360 : 196, alignment: .topLeading)
+        .frame(width: 360, alignment: .topLeading)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
@@ -24,28 +24,32 @@ struct FloatingWidgetView: View {
     }
 
     private var header: some View {
-        Button {
-            store.isExpanded.toggle()
-        } label: {
-            HStack(spacing: 10) {
-                statusDots
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(summary)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.primary)
-                    Text("AI Activity")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 8)
-                Image(systemName: store.isExpanded ? "chevron.down" : "chevron.left")
-                    .font(.system(size: 11, weight: .semibold))
+        HStack(spacing: 10) {
+            statusDots
+            VStack(alignment: .leading, spacing: 2) {
+                Text(summary)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.primary)
+                Text("AI Activity")
+                    .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             }
-            .padding(12)
-            .contentShape(Rectangle())
+            Spacer(minLength: 8)
+            Image(systemName: store.isExpanded ? "chevron.down" : "chevron.left")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
         }
-        .buttonStyle(.plain)
+        .padding(12)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            store.isExpanded.toggle()
+        }
+        .highPriorityGesture(
+            DragGesture(minimumDistance: 1)
+                .onChanged { _ in
+                    // No-op: Just to intercept movement and prevent tap gesture from firing
+                }
+        )
     }
 
     private var statusDots: some View {

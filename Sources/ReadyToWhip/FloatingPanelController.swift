@@ -10,7 +10,7 @@ final class FloatingPanelController {
         let hostingView = NSHostingView(rootView: content)
 
         let panel = NSPanel(
-            contentRect: NSRect(x: 100, y: 100, width: 196, height: 64),
+            contentRect: NSRect(x: 100, y: 100, width: 360, height: 64),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false

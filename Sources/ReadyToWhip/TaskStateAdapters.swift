@@ -324,7 +324,7 @@ private final class AntigravityTaskStateAdapter: ToolStateAdapter, @unchecked Se
                 summary: isNewer ? summarizeAntigravityLog(tail: tail) : best.summary,
                 detail: isNewer ? URL(fileURLWithPath: path).lastPathComponent : best.detail,
                 containsFatalError: best.containsFatalError || isFatal,
-                containsWork: best.containsWork || hasWork
+                containsWork: best.containsWork || hasWork || tail.localizedCaseInsensitiveContains("Requesting planner") || tail.localizedCaseInsensitiveContains("streamGenerateContent")
             )
         }
 
@@ -374,12 +374,13 @@ private final class AntigravityTaskStateAdapter: ToolStateAdapter, @unchecked Se
         let workspaceAge = Date().timeIntervalSince(workspace.modifiedAt)
         let logAge = signal.date.map { Date().timeIntervalSince($0) } ?? .greatestFiniteMagnitude
 
-        // Only mark failed if BOTH the log and the workspace are fresh,
-        // preventing a single global log signal from tainting old workspaces.
-        if logAge <= 2 * 60 && workspaceAge <= 5 * 60 && signal.containsFatalError && process == nil {
+        if logAge <= 2 * 60 && signal.summary.contains("No model capacity") {
             return .failed
         }
-        if let process, process.cpu >= 2.0 {
+        if logAge <= 2 * 60 && (signal.summary.contains("Thinking") || signal.summary.contains("Generating")) {
+            return .working
+        }
+        if let process, process.cpu >= 5.0 { 
             return .working
         }
         // Fresh log with active work signals → agent is still running
@@ -398,10 +399,16 @@ private final class AntigravityTaskStateAdapter: ToolStateAdapter, @unchecked Se
     }
 
     private func summarizeAntigravityLog(tail: String) -> String {
-        let lines = tail.split(separator: "\n").suffix(20).map(String.init).reversed()
+        let lines = tail.split(separator: "\n").suffix(50).map(String.init).reversed()
         for line in lines {
-            if line.localizedCaseInsensitiveContains("UNAVAILABLE") {
+            if line.localizedCaseInsensitiveContains("UNAVAILABLE") || line.localizedCaseInsensitiveContains("No capacity") {
                 return "No model capacity"
+            }
+            if line.localizedCaseInsensitiveContains("Requesting planner") || line.localizedCaseInsensitiveContains("planner_generator") {
+                return "Thinking..."
+            }
+            if line.localizedCaseInsensitiveContains("streamGenerateContent") {
+                return "Generating..."
             }
             if line.localizedCaseInsensitiveContains("Language server started") {
                 return "Language server active"
