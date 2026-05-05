@@ -15,12 +15,12 @@ It runs as a lightweight floating widget and menu bar app. The first version det
 
 ## Task-State Adapters
 
-The MVP now has first-class task-state adapters for Codex Desktop and Antigravity:
+The MVP uses dedicated task-state adapters for each supported tool:
 
 - Codex Desktop reads `~/.codex/state_5.sqlite`, `~/.codex/logs_2.sqlite`, and rollout JSONL tails to show recent Codex threads as task items.
-- Antigravity reads `~/Library/Application Support/Antigravity/User/workspaceStorage` plus recent agent/cloudcode/language-server logs to infer working, waiting, failed, or idle.
-
-Other tools still use coarse process/window detection until dedicated adapters are added.
+- Codex CLI, Gemini CLI, and Claude Code require a real CLI process and ignore desktop helpers, login processes, crash reporters, and background browser/profile processes.
+- Cursor requires the actual Cursor desktop app to be running, then uses its visible windows, related processes, and workspace storage for project context.
+- Antigravity requires the actual app, an active language-server process, or a recent explicit agent log signal. Background model-list polling and old workspace storage are not enough to create a session.
 
 ## Build
 

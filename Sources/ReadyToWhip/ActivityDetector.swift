@@ -19,22 +19,32 @@ final class ActivityDetector {
     func detect(enabledToolNames: Set<String>? = nil) -> [AIActivity] {
         let now = Date()
         let enabled = enabledToolNames ?? Set(ToolCatalog.supported.map(\.name))
+        let taskStateManagedTools: Set<String> = [
+            "Codex Desktop",
+            "Codex CLI",
+            "Cursor",
+            "Antigravity",
+            "Gemini CLI",
+            "Claude Code"
+        ]
         let needsGenericDesktopDetection = ToolCatalog.supported.contains { tool in
             enabled.contains(tool.name)
                 && !tool.bundleIdentifiers.isEmpty
-                && tool.name != "Codex Desktop"
-                && tool.name != "Antigravity"
+                && !taskStateManagedTools.contains(tool.name)
         }
         let needsCLIDetection = ToolCatalog.supported.contains { tool in
-            enabled.contains(tool.name) && tool.bundleIdentifiers.isEmpty
+            enabled.contains(tool.name) && tool.bundleIdentifiers.isEmpty && !taskStateManagedTools.contains(tool.name)
         }
-        let needsProcesses = enabled.contains("Antigravity") || needsGenericDesktopDetection || needsCLIDetection
-        let needsWindows = needsGenericDesktopDetection || needsCLIDetection
+        let needsAdapterProcesses = !enabled.intersection(["Codex CLI", "Cursor", "Antigravity", "Gemini CLI", "Claude Code"]).isEmpty
+        let needsAdapterWindows = !enabled.intersection(["Codex CLI", "Cursor", "Antigravity", "Gemini CLI", "Claude Code"]).isEmpty
+        let needsProcesses = needsAdapterProcesses || needsGenericDesktopDetection || needsCLIDetection
+        let needsWindows = needsAdapterWindows || needsGenericDesktopDetection || needsCLIDetection
 
         let windows = needsWindows ? collectWindows() : [:]
         let processes = needsProcesses ? collectProcesses() : []
         let context = AppRuntimeContext(
             codexPID: enabled.contains("Codex Desktop") ? runningPID(bundleIdentifier: "com.openai.codex", localizedName: "Codex") : nil,
+            cursorPID: enabled.contains("Cursor") ? runningPID(bundleIdentifier: "com.cursor.Cursor", localizedName: "Cursor") : nil,
             antigravityPID: enabled.contains("Antigravity") ? runningPID(bundleIdentifier: "com.google.antigravity", localizedName: "Antigravity") : nil,
             processes: processes,
             windows: windows
@@ -114,7 +124,15 @@ final class ActivityDetector {
             if app.bundleIdentifier == bundleIdentifier {
                 return true
             }
-            return app.localizedName?.localizedCaseInsensitiveContains(localizedName) == true
+            guard let appName = app.localizedName?.nilIfBlank else {
+                return false
+            }
+            let lowerName = appName.lowercased()
+            let noise = ["service", "helper", "crashpad", "viewservice", "codexbar"]
+            guard !noise.contains(where: { lowerName.contains($0) }) else {
+                return false
+            }
+            return appName.caseInsensitiveCompare(localizedName) == .orderedSame
         }?.processIdentifier
     }
 

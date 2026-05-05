@@ -259,4 +259,31 @@ MVP detection strategy:
 - Detect `Working` from recent Cloud Code requests, language-server activity, or agent logs.
 - Fall back to `Waiting` or `Idle` based on log recency.
 
+Important guardrail:
+
+- Old `workspaceStorage` entries are historical state, not live sessions.
+- Recurring `loadCodeAssist` / `fetchAvailableModels` polling is background health traffic, not active agent work.
+- A visible Antigravity session now needs the real app, a language-server process tied to the workspace, or a fresh explicit agent signal such as planner or stream generation.
+
 This is still not as strong as a dedicated localhost language-server probe, but it is materially closer to AI task-state detection than process presence.
+
+### Cursor
+
+Cursor is monitored as a running desktop app, not from stale support files alone.
+
+MVP detection strategy:
+
+- Require the actual Cursor app process, not `CursorUIViewService`, crashpad, or sandbox helpers.
+- Use visible window titles and VS Code-style workspace storage for project context.
+- Treat high related-process CPU or working/generating title text as `Working`; otherwise a visible running Cursor workspace is `Waiting`.
+
+### Codex CLI, Gemini CLI, Claude Code
+
+CLI tools are monitored from real running CLI processes only.
+
+MVP detection strategy:
+
+- Match real executable paths such as `codex`, `gemini`, and `claude`.
+- Exclude desktop app bundles, login/auth helper processes, crash reporters, and Antigravity's `.gemini` browser profile.
+- Use terminal windows and process cwd to infer project context.
+- Treat CPU activity or working/generating text as `Working`; otherwise an attached live CLI process is `Waiting`.
