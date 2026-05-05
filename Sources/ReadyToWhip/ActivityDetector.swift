@@ -403,7 +403,7 @@ final class ActivityDetector {
         if lower.contains("google chrome") || lower.contains("chrome helper") {
             return true
         }
-        if lower.contains("codexbar") || lower.contains("codex login") {
+        if lower.contains("codexbar") || lower.contains("codex login") || lower.contains("gemini") {
             return true
         }
         return false

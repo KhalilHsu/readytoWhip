@@ -16,7 +16,8 @@ protocol ToolStateAdapter: Sendable {
 enum TaskStateAdapters {
     static let adapters: [ToolStateAdapter] = [
         CodexTaskStateAdapter(),
-        AntigravityTaskStateAdapter()
+        AntigravityTaskStateAdapter(),
+        GeminiTaskStateAdapter()
     ]
 
     static func detect(context: AppRuntimeContext) -> [AIActivity] {
@@ -381,10 +382,15 @@ private final class AntigravityTaskStateAdapter: ToolStateAdapter, @unchecked Se
         if let process, process.cpu >= 2.0 {
             return .working
         }
+        // Fresh log with active work signals → agent is still running
         if logAge <= 2 * 60 && signal.containsWork {
+            return .working
+        }
+        // Log existed but has gone quiet (2–15 min ago) and no process → agent just finished
+        if logAge > 2 * 60 && logAge <= 15 * 60 && signal.containsWork && process == nil {
             return .done
         }
-        // Tightened from 10 min → 5 min to reduce ghost entry duration.
+        // Process is idle but workspace is still warm
         if process != nil || workspaceAge <= 5 * 60 {
             return .waiting
         }
@@ -408,6 +414,99 @@ private final class AntigravityTaskStateAdapter: ToolStateAdapter, @unchecked Se
             }
         }
         return lines.first?.nilIfBlank ?? "Antigravity"
+    }
+}
+
+private final class GeminiTaskStateAdapter: ToolStateAdapter, @unchecked Sendable {
+    private var tmpRoot: String {
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".gemini/tmp").path
+    }
+
+    func detect(context: AppRuntimeContext) -> [AIActivity] {
+        let geminiProcesses = context.processes.filter { $0.commandLine.contains("gemini") && !$0.commandLine.contains("ReadyToWhip") && !$0.commandLine.contains("grep") }
+        guard !geminiProcesses.isEmpty else { return [] }
+
+        guard let userDirs = try? FileManager.default.contentsOfDirectory(atPath: tmpRoot) else { return [] }
+        
+        var activities: [AIActivity] = []
+        for userDir in userDirs {
+            let logsPath = "\(tmpRoot)/\(userDir)/logs.json"
+            guard let data = FileManager.default.contents(atPath: logsPath),
+                  let logs = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
+                  let lastLog = logs.last,
+                  let sessionId = lastLog["sessionId"] as? String,
+                  let lastMsg = lastLog["message"] as? String,
+                  let timestampStr = lastLog["timestamp"] as? String else {
+                continue
+            }
+            
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            let lastLogDate = formatter.date(from: timestampStr) ?? Date()
+            
+            // Look for the session jsonl file to check if it's done
+            let chatsDir = "\(tmpRoot)/\(userDir)/chats"
+            var isWorking = false
+            var lastUpdate = lastLogDate
+            
+            if let chatFiles = try? FileManager.default.contentsOfDirectory(atPath: chatsDir) {
+                if let sessionFile = chatFiles.first(where: { $0.contains(sessionId) }) {
+                    let sessionPath = "\(chatsDir)/\(sessionFile)"
+                    if let attrs = try? FileManager.default.attributesOfItem(atPath: sessionPath),
+                       let modDate = attrs[.modificationDate] as? Date {
+                        lastUpdate = max(lastUpdate, modDate)
+                        let tail = tailText(path: sessionPath, maxBytes: 8000)
+                        if tail.contains("\"toolCalls\":") && !tail.contains("\"status\":\"success\"") {
+                            isWorking = true
+                        } else if tail.contains("thoughts") && !tail.contains("\"content\":") {
+                            isWorking = true
+                        } else if abs(modDate.timeIntervalSinceNow) < 5 {
+                            isWorking = true
+                        }
+                    }
+                }
+            }
+            
+            // Check CPU
+            let cpu = geminiProcesses.reduce(0) { $0 + $1.cpu }
+            if cpu > 1.0 {
+                isWorking = true
+            }
+            
+            // Read project root
+            var projectName = "Unknown Project"
+            if let rootData = FileManager.default.contents(atPath: "\(tmpRoot)/\(userDir)/.project_root"),
+               let rootPath = String(data: rootData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) {
+                projectName = URL(fileURLWithPath: rootPath).lastPathComponent
+            }
+            
+            let timeAge = abs(lastUpdate.timeIntervalSinceNow)
+            let status: ActivityStatus
+            if isWorking || timeAge < 10 {
+                status = .working
+            } else if timeAge < 120 {
+                status = .done
+            } else if timeAge < 600 {
+                status = .waiting
+            } else {
+                status = .idle
+            }
+            
+            activities.append(AIActivity(
+                id: "gemini-\(sessionId)",
+                toolName: "Gemini CLI",
+                bundleIdentifier: nil,
+                processIdentifier: geminiProcesses.first?.pid ?? -1,
+                source: .cli,
+                status: status,
+                projectName: projectName,
+                windowTitle: lastMsg,
+                commandLine: "session \(sessionId.prefix(8)) · cpu \(String(format: "%.1f", cpu))%",
+                lastUpdated: lastUpdate
+            ))
+        }
+        
+        return activities
     }
 }
 
