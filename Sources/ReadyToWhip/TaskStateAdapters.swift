@@ -475,7 +475,21 @@ private final class GeminiTaskStateAdapter: ToolStateAdapter, @unchecked Sendabl
             
             // Read project root
             var projectName = "Unknown Project"
-            if let rootData = FileManager.default.contents(atPath: "\(tmpRoot)/\(userDir)/.project_root"),
+            
+            // Try to extract from the gemini node process CWD first
+            if let pid = geminiProcesses.first?.pid {
+                if let cwd = getProcessCWD(pid: pid), cwd != "/" {
+                    if cwd == FileManager.default.homeDirectoryForCurrentUser.path {
+                        projectName = "Home (~)"
+                    } else {
+                        projectName = URL(fileURLWithPath: cwd).lastPathComponent
+                    }
+                }
+            }
+            
+            // Fallback to .project_root file if CWD extraction fails
+            if projectName == "Unknown Project",
+               let rootData = FileManager.default.contents(atPath: "\(tmpRoot)/\(userDir)/.project_root"),
                let rootPath = String(data: rootData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) {
                 if rootPath == FileManager.default.homeDirectoryForCurrentUser.path {
                     projectName = "Home (~)"
@@ -527,6 +541,36 @@ private struct AntigravityLogSignal {
     let detail: String?
     let containsFatalError: Bool
     let containsWork: Bool
+}
+
+private func getProcessCWD(pid: Int32) -> String? {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
+    process.arguments = ["-a", "-p", String(pid), "-d", "cwd", "-F", "n"]
+    
+    let pipe = Pipe()
+    process.standardOutput = pipe
+    process.standardError = Pipe()
+    
+    do {
+        try process.run()
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        
+        guard let output = String(data: data, encoding: .utf8) else { return nil }
+        
+        let lines = output.components(separatedBy: .newlines)
+        for line in lines {
+            if line.hasPrefix("n") {
+                let path = String(line.dropFirst())
+                return path.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        }
+    } catch {
+        return nil
+    }
+    
+    return nil
 }
 
 private func runSQLite(database: String, query: String) -> [String] {
