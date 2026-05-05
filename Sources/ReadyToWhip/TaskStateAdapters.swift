@@ -195,8 +195,15 @@ private final class AntigravityTaskStateAdapter: ToolStateAdapter, @unchecked Se
         }
 
         let logSignal = latestLogSignal()
-        return workspaces().map { workspace in
+        return workspaces().compactMap { workspace in
             let process = languageServerProcess(for: workspace, processes: processes)
+            let workspaceAge = Date().timeIntervalSince(workspace.modifiedAt)
+            
+            // Only surface workspaces touched recently OR running an active language server process
+            guard process != nil || workspaceAge <= 2 * 60 * 60 else {
+                return nil
+            }
+
             let status = antigravityStatus(workspace: workspace, process: process, signal: logSignal)
             let lastUpdated = max(workspace.modifiedAt, logSignal.date ?? .distantPast)
 
@@ -244,9 +251,6 @@ private final class AntigravityTaskStateAdapter: ToolStateAdapter, @unchecked Se
             )
         }
         .filter { !$0.name.isEmpty }
-        // Only surface workspaces touched in the last 2 hours to avoid showing
-        // all historical projects a user has ever opened in Antigravity.
-        .filter { Date().timeIntervalSince($0.modifiedAt) <= 2 * 60 * 60 }
     }
 
     private func latestLogSignal() -> AntigravityLogSignal {
