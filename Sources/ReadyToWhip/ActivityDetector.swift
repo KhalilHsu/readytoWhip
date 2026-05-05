@@ -36,7 +36,8 @@ final class ActivityDetector {
         let context = AppRuntimeContext(
             codexPID: enabled.contains("Codex Desktop") ? runningPID(bundleIdentifier: "com.openai.codex", localizedName: "Codex") : nil,
             antigravityPID: enabled.contains("Antigravity") ? runningPID(bundleIdentifier: "com.google.antigravity", localizedName: "Antigravity") : nil,
-            processes: processes
+            processes: processes,
+            windows: windows
         )
         let taskStateActivities = TaskStateAdapters.detect(context: context)
             .filter { enabled.contains($0.toolName) }

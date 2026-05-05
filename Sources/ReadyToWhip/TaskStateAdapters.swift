@@ -6,6 +6,7 @@ struct AppRuntimeContext {
     let codexPID: Int32?
     let antigravityPID: Int32?
     let processes: [ProcessSnapshot]
+    let windows: [Int32: [WindowSnapshot]]
 }
 
 protocol ToolStateAdapter: Sendable {
@@ -206,6 +207,7 @@ private final class AntigravityTaskStateAdapter: ToolStateAdapter, @unchecked Se
 
             let status = antigravityStatus(workspace: workspace, process: process, signal: logSignal)
             let lastUpdated = max(workspace.modifiedAt, logSignal.date ?? .distantPast)
+            let activeFile = activeFilename(storageID: workspace.storageID)
 
             return AIActivity(
                 id: "antigravity-workspace-\(workspace.storageID)",
@@ -215,11 +217,52 @@ private final class AntigravityTaskStateAdapter: ToolStateAdapter, @unchecked Se
                 source: .desktopApp,
                 status: status,
                 projectName: workspace.name,
-                windowTitle: status == .failed ? logSignal.summary : workspace.folderPath,
+                windowTitle: status == .failed ? logSignal.summary : (activeFile ?? workspace.name),
                 commandLine: process.map { "language server pid \($0.pid) · cpu \(String(format: "%.1f", $0.cpu))%" } ?? logSignal.detail,
                 lastUpdated: lastUpdated == .distantPast ? Date() : lastUpdated
             )
         }
+    }
+
+    private func activeFilename(storageID: String) -> String? {
+        let dbPath = "\(supportRoot)/User/workspaceStorage/\(storageID)/state.vscdb"
+        let query = "SELECT value FROM ItemTable WHERE key = 'memento/workbench.parts.editor'"
+        guard let jsonStr = runSQLite(database: dbPath, query: query).first,
+              let data = jsonStr.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let editorPart = json["editorpart.state"] as? [String: Any],
+              let serializedGrid = editorPart["serializedGrid"] as? [String: Any],
+              let root = serializedGrid["root"] as? [String: Any],
+              let rootData = root["data"] as? [[String: Any]],
+              let firstLeaf = rootData.first(where: { $0["type"] as? String == "leaf" }),
+              let leafData = firstLeaf["data"] as? [String: Any],
+              let editors = leafData["editors"] as? [[String: Any]],
+              let mru = leafData["mru"] as? [Int],
+              let activeIndex = mru.first,
+              editors.indices.contains(activeIndex)
+        else {
+            return nil
+        }
+        
+        let activeEditor = editors[activeIndex]
+        if let valueStr = activeEditor["value"] as? String,
+           let valueData = valueStr.data(using: .utf8),
+           let valueJson = try? JSONSerialization.jsonObject(with: valueData) as? [String: Any] {
+            
+            if let resourceJSON = valueJson["resourceJSON"] as? [String: Any],
+               let fsPath = resourceJSON["fsPath"] as? String {
+                return URL(fileURLWithPath: fsPath).lastPathComponent
+            }
+            
+            if let ariStr = valueJson["ari"] as? String,
+               let ariData = ariStr.data(using: .utf8),
+               let ariJson = try? JSONSerialization.jsonObject(with: ariData) as? [String: Any],
+               let sourceUri = ariJson["sourceUri"] as? String {
+                return URL(fileURLWithPath: sourceUri).lastPathComponent
+            }
+        }
+        
+        return nil
     }
 
     private func workspaces() -> [AntigravityWorkspace] {
@@ -332,6 +375,9 @@ private final class AntigravityTaskStateAdapter: ToolStateAdapter, @unchecked Se
         }
         if let process, process.cpu >= 0.5 {
             return .working
+        }
+        if logAge <= 2 * 60 && signal.containsWork {
+            return .done
         }
         // Tightened from 10 min → 5 min to reduce ghost entry duration.
         if process != nil || workspaceAge <= 5 * 60 {
