@@ -302,23 +302,28 @@ private final class AntigravityTaskStateAdapter: ToolStateAdapter, @unchecked Se
 
         for path in candidates {
             guard let attrs = try? FileManager.default.attributesOfItem(atPath: path),
-                  let modified = attrs[.modificationDate] as? Date,
-                  modified > (best.date ?? .distantPast)
+                  let modified = attrs[.modificationDate] as? Date
             else {
                 continue
             }
 
             let tail = tailText(path: path, maxBytes: 32_000)
+            let isFatal = tail.localizedCaseInsensitiveContains("UNAVAILABLE")
+                || tail.localizedCaseInsensitiveContains("No capacity available")
+                || tail.localizedCaseInsensitiveContains("quota exceeded")
+            
+            let hasWork = tail.localizedCaseInsensitiveContains("POST v1internal")
+                || tail.localizedCaseInsensitiveContains("Language server started")
+                || tail.localizedCaseInsensitiveContains("agent")
+            
+            let isNewer = modified > (best.date ?? .distantPast)
+
             best = AntigravityLogSignal(
-                date: modified,
-                summary: summarizeAntigravityLog(tail: tail),
-                detail: URL(fileURLWithPath: path).lastPathComponent,
-                containsFatalError: tail.localizedCaseInsensitiveContains("UNAVAILABLE")
-                    || tail.localizedCaseInsensitiveContains("No capacity available")
-                    || tail.localizedCaseInsensitiveContains("quota exceeded"),
-                containsWork: tail.localizedCaseInsensitiveContains("POST v1internal")
-                    || tail.localizedCaseInsensitiveContains("Language server started")
-                    || tail.localizedCaseInsensitiveContains("agent")
+                date: isNewer ? modified : best.date,
+                summary: isNewer ? summarizeAntigravityLog(tail: tail) : best.summary,
+                detail: isNewer ? URL(fileURLWithPath: path).lastPathComponent : best.detail,
+                containsFatalError: best.containsFatalError || isFatal,
+                containsWork: best.containsWork || hasWork
             )
         }
 
@@ -373,7 +378,7 @@ private final class AntigravityTaskStateAdapter: ToolStateAdapter, @unchecked Se
         if logAge <= 2 * 60 && workspaceAge <= 5 * 60 && signal.containsFatalError && process == nil {
             return .failed
         }
-        if let process, process.cpu >= 0.5 {
+        if let process, process.cpu >= 2.0 {
             return .working
         }
         if logAge <= 2 * 60 && signal.containsWork {
