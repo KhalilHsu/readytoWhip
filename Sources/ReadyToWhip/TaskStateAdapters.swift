@@ -477,7 +477,11 @@ private final class GeminiTaskStateAdapter: ToolStateAdapter, @unchecked Sendabl
             var projectName = "Unknown Project"
             if let rootData = FileManager.default.contents(atPath: "\(tmpRoot)/\(userDir)/.project_root"),
                let rootPath = String(data: rootData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) {
-                projectName = URL(fileURLWithPath: rootPath).lastPathComponent
+                if rootPath == FileManager.default.homeDirectoryForCurrentUser.path {
+                    projectName = "Home (~)"
+                } else {
+                    projectName = URL(fileURLWithPath: rootPath).lastPathComponent
+                }
             }
             
             let timeAge = abs(lastUpdate.timeIntervalSinceNow)
