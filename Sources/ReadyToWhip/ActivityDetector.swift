@@ -132,9 +132,11 @@ final class ActivityDetector {
             let title = terminalWindow?.title
             let status = inferCLIStatus(process: process, terminalTitle: title)
             let projectName = inferProjectName(from: title, fallback: nil)
+            
+            let id = terminalWindow != nil ? "cli-window-\(terminalWindow!.pid)-\(tool.id)" : "cli-headless-\(tool.id)"
 
             return AIActivity(
-                id: "cli-\(process.pid)-\(tool.id)",
+                id: id,
                 toolName: tool.name,
                 bundleIdentifier: terminalBundleIdentifier(for: process),
                 processIdentifier: process.pid,
@@ -341,7 +343,7 @@ final class ActivityDetector {
         if lower.contains("running") || lower.contains("working") || lower.contains("thinking") || lower.contains("generating") || lower.contains("processing") || lower.contains("streaming") {
             return .working
         }
-        return .idle
+        return fallback
     }
 
     private func inferProjectName(from title: String?, fallback: String?) -> String? {
@@ -396,6 +398,12 @@ final class ActivityDetector {
             return true
         }
         if lower.contains("grep") || lower.contains("/bin/ps") {
+            return true
+        }
+        if lower.contains("google chrome") || lower.contains("chrome helper") {
+            return true
+        }
+        if lower.contains("codexbar") || lower.contains("codex login") {
             return true
         }
         return false
