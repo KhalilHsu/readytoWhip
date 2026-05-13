@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import SwiftUI
 
 @MainActor
@@ -8,6 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private var statusItem: NSStatusItem?
     private var panelController: FloatingPanelController?
     private var settingsWindow: NSWindow?
+    private var didPromptAccessibility = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         if CommandLine.arguments.contains("--dump-activities") {
@@ -26,6 +28,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         
         print("🚀 [Debug] Creating Floating Panel...")
         createFloatingPanel()
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+            self?.promptForAccessibilityIfNeeded()
+        }
         
         print("🚀 [Debug] Launch sequence complete!")
     }
@@ -102,5 +108,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             ].joined(separator: "\t"))
         }
         NSApp.terminate(nil)
+    }
+
+    private func promptForAccessibilityIfNeeded() {
+        guard !didPromptAccessibility else { return }
+        guard !AXIsProcessTrusted() else { return }
+        didPromptAccessibility = true
+
+        let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
+        _ = AXIsProcessTrustedWithOptions(options)
+
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = "Accessibility Permission Needed"
+        alert.informativeText = "ReadyToWhip uses window titles and focused-window metadata to track live sessions. Without Accessibility permission, app and terminal detection may be incomplete."
+        alert.addButton(withTitle: "Open Settings")
+        alert.addButton(withTitle: "Later")
+
+        NSApp.activate(ignoringOtherApps: true)
+        let response = alert.runModal()
+        guard response == .alertFirstButtonReturn else { return }
+
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+            NSWorkspace.shared.open(url)
+        }
     }
 }

@@ -1055,8 +1055,11 @@ private func getProcessCWD(pid: Int32) -> String? {
     
     do {
         try process.run()
+        guard waitForProcessExit(process, timeout: 1.2) else {
+            process.terminate()
+            return nil
+        }
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
         
         guard let output = String(data: data, encoding: .utf8) else { return nil }
         
@@ -1072,6 +1075,16 @@ private func getProcessCWD(pid: Int32) -> String? {
     }
     
     return nil
+}
+
+private func waitForProcessExit(_ process: Process, timeout: TimeInterval) -> Bool {
+    let group = DispatchGroup()
+    group.enter()
+    DispatchQueue.global(qos: .utility).async {
+        process.waitUntilExit()
+        group.leave()
+    }
+    return group.wait(timeout: .now() + timeout) == .success
 }
 
 private func runSQLite(database: String, query: String) -> [String] {
