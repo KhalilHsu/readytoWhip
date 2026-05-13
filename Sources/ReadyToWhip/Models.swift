@@ -34,6 +34,34 @@ enum ActivityStatus: String, CaseIterable, Codable, Hashable {
     }
 }
 
+enum PetAnimationState: String, CaseIterable, Hashable {
+    case idle
+    case running
+    case waiting
+    case waving
+    case failed
+
+    var bubbleTitle: String {
+        switch self {
+        case .idle: "Quiet right now"
+        case .running: "Actively tracking"
+        case .waiting: "Waiting on input"
+        case .waving: "Recent progress"
+        case .failed: "Attention needed"
+        }
+    }
+
+    var accentColor: NSColor {
+        switch self {
+        case .idle: .systemTeal
+        case .running: .systemBlue
+        case .waiting: .systemOrange
+        case .waving: .systemGreen
+        case .failed: .systemRed
+        }
+    }
+}
+
 enum ActivitySource: String, Codable, Hashable {
     case desktopApp = "Desktop App"
     case cli = "CLI"
@@ -55,6 +83,17 @@ struct AIActivity: Identifiable, Codable, Hashable {
     var subtitle: String {
         let project = projectName?.nilIfBlank ?? windowTitle?.nilIfBlank ?? source.rawValue
         return project
+    }
+
+    var lastUpdatedRelativeText: String {
+        let seconds = max(0, Int(Date().timeIntervalSince(lastUpdated)))
+        if seconds < 60 {
+            return "just now"
+        }
+        if seconds < 3600 {
+            return "\(seconds / 60)m ago"
+        }
+        return "\(seconds / 3600)h ago"
     }
 }
 

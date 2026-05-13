@@ -15,6 +15,52 @@ final class ActivityStore: ObservableObject {
     var workingCount: Int { activities.filter { $0.status == .working }.count }
     var waitingCount: Int { activities.filter { $0.status == .waiting }.count }
     var doneCount: Int { activities.filter { $0.status == .done }.count }
+    var failedCount: Int { activities.filter { $0.status == .failed }.count }
+    var activeCount: Int { activities.filter { $0.status != .idle && $0.status != .unknown }.count }
+
+    var headlineActivity: AIActivity? {
+        activities.sorted {
+            if $0.status.priority == $1.status.priority {
+                return $0.lastUpdated > $1.lastUpdated
+            }
+            return $0.status.priority < $1.status.priority
+        }.first
+    }
+
+    var petState: PetAnimationState {
+        if failedCount > 0 {
+            return .failed
+        }
+        if workingCount > 0 {
+            return .running
+        }
+        if waitingCount > 0 {
+            return .waiting
+        }
+        if doneCount > 0 {
+            return .waving
+        }
+        return .idle
+    }
+
+    var bubbleMessage: String {
+        guard let headlineActivity else {
+            return "Waiting for your next AI session."
+        }
+
+        switch headlineActivity.status {
+        case .working:
+            return "\(headlineActivity.toolName) is active in \(headlineActivity.subtitle)."
+        case .waiting:
+            return "\(headlineActivity.toolName) is waiting for input."
+        case .done:
+            return "\(headlineActivity.toolName) wrapped up recently."
+        case .failed:
+            return "\(headlineActivity.toolName) may need attention."
+        case .idle, .unknown:
+            return "Monitoring supported tools in the background."
+        }
+    }
 
     func start() {
         refresh()

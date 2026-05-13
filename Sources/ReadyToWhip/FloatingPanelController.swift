@@ -5,12 +5,12 @@ import SwiftUI
 final class FloatingPanelController {
     private let panel: NSPanel
 
-    init(store: ActivityStore) {
-        let content = FloatingWidgetView(store: store)
+    init(store: ActivityStore, petLibrary: PetLibrary) {
+        let content = FloatingWidgetView(store: store, petLibrary: petLibrary)
         let hostingView = NSHostingView(rootView: content)
 
         let panel = NSPanel(
-            contentRect: NSRect(x: 100, y: 100, width: 360, height: 64),
+            contentRect: NSRect(x: 100, y: 100, width: 220, height: 250),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -23,8 +23,8 @@ final class FloatingPanelController {
         panel.hasShadow = true
         panel.isMovableByWindowBackground = true
         panel.contentView = hostingView
-        
-        panel.center()
+
+        positionInTopRight()
     }
 
     private func positionInTopRight() {

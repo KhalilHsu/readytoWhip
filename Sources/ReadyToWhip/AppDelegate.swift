@@ -4,6 +4,7 @@ import SwiftUI
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private let store = ActivityStore()
+    private let petLibrary = PetLibrary()
     private var statusItem: NSStatusItem?
     private var panelController: FloatingPanelController?
     private var settingsWindow: NSWindow?
@@ -49,7 +50,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     }
 
     private func createFloatingPanel() {
-        let controller = FloatingPanelController(store: store)
+        let controller = FloatingPanelController(store: store, petLibrary: petLibrary)
         controller.show()
         panelController = controller
     }
@@ -64,12 +65,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
     @objc private func showSettings() {
         if settingsWindow == nil {
-            let view = SettingsView(settings: SettingsStore.shared, onRefresh: { [weak self] in
+            let view = SettingsView(settings: SettingsStore.shared, petLibrary: petLibrary, onRefresh: { [weak self] in
                 self?.store.refresh()
                 self?.store.start()
             })
             let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 420, height: 360),
+                contentRect: NSRect(x: 0, y: 0, width: 420, height: 390),
                 styleMask: [.titled, .closable, .miniaturizable],
                 backing: .buffered,
                 defer: false
