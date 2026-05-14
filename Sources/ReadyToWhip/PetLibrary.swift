@@ -164,7 +164,9 @@ final class PetLibrary: ObservableObject {
                 return nil
             }
 
-            let slug = (raw["slug"] as? String)?.nilIfBlank ?? url.lastPathComponent
+            let slug = (raw["slug"] as? String)?.nilIfBlank 
+                ?? (raw["id"] as? String)?.nilIfBlank 
+                ?? url.lastPathComponent
             let displayName = (raw["displayName"] as? String)?.nilIfBlank
                 ?? (raw["name"] as? String)?.nilIfBlank
                 ?? slug

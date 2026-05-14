@@ -67,6 +67,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
                 backing: .buffered,
                 defer: false
             )
+            window.isReleasedWhenClosed = false
             window.title = "AI Activity Settings"
             window.contentView = NSHostingView(rootView: view)
             window.center()
