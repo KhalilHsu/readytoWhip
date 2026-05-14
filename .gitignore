@@ -2,3 +2,16 @@
 .build/
 .swiftpm/
 log/
+.env
+.env.*
+*.log
+*.sqlite
+*.db
+*.jsonl
+*.pem
+*.key
+*.p12
+*.mobileprovision
+DerivedData/
+xcuserdata/
+*.xcuserstate

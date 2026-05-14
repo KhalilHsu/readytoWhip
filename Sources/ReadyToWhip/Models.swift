@@ -85,6 +85,19 @@ struct AIActivity: Identifiable, Codable, Hashable {
         return project
     }
 
+    var displaySubtitle: String {
+        ActivityPrivacy.redactedProjectName(projectName)
+            ?? ActivityPrivacy.redactedWindowTitle(windowTitle)
+            ?? source.rawValue
+    }
+
+    var displayDetail: String? {
+        if let title = ActivityPrivacy.redactedWindowTitle(windowTitle), title != displaySubtitle {
+            return title
+        }
+        return ActivityPrivacy.redactedCommandLine(commandLine)
+    }
+
     var lastUpdatedRelativeText: String {
         let seconds = max(0, Int(Date().timeIntervalSince(lastUpdated)))
         if seconds < 60 {

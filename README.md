@@ -45,6 +45,20 @@ swift build
 swift run ReadyToWhip
 ```
 
+## Dump Activities
+
+```bash
+swift run ReadyToWhip --dump-activities
+```
+
+`--dump-activities` now redacts local paths, long titles, usernames, and command arguments by default.
+
+Use raw output only for local debugging:
+
+```bash
+swift run ReadyToWhip --dump-activities --dump-raw
+```
+
 ## Build App Bundle
 
 ```bash
@@ -63,4 +77,20 @@ This builds the app, replaces `/Applications/ReadyToWhip.app`, and opens it.
 ## Notes
 
 The first detector is intentionally weak and local-only. It uses running applications, visible window metadata, and process command lines. Deeper provider/session adapters should be added one tool at a time after the MVP UI loop is usable.
-der/session adapters should be added one tool at a time after the MVP UI loop is usable.
+
+## Privacy
+
+ReadyToWhip is a local-only monitor. It reads local process metadata, visible window titles, workspace hints, and provider-specific local state in order to infer activity.
+
+- No network upload, telemetry, or cloud sync is built into the current app.
+- Local activity details can still contain project names, file names, workspace names, and terminal context.
+- UI summaries and `--dump-activities` output are intentionally redacted by default to reduce accidental leakage in screenshots, issues, and pasted logs.
+- Development-only scripts under `dev-scripts/` may print raw local metadata and should not be pasted publicly without review.
+
+## Disclaimer
+
+ReadyToWhip is not affiliated with OpenAI, Anthropic, Google, Cursor, or other monitored tools.
+
+## License
+
+See `LICENSE` for the current terms.

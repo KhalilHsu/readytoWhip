@@ -12,28 +12,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private var didPromptAccessibility = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        if CommandLine.arguments.contains("--dump-activities") {
-            dumpActivitiesAndQuit()
-            return
-        }
-
-        print("🚀 [Debug] App is launching...")
         NSApp.setActivationPolicy(.accessory)
-        
-        print("🚀 [Debug] Starting ActivityStore...")
         store.start()
-        
-        print("🚀 [Debug] Creating Menu Bar Item...")
         createMenuBarItem()
-        
-        print("🚀 [Debug] Creating Floating Panel...")
         createFloatingPanel()
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
             self?.promptForAccessibilityIfNeeded()
         }
-        
-        print("🚀 [Debug] Launch sequence complete!")
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -92,21 +78,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     }
 
     @objc private func quit() {
-        NSApp.terminate(nil)
-    }
-
-    private func dumpActivitiesAndQuit() {
-        let activities = ActivityDetector().detect()
-        print("ReadyToWhip detected \(activities.count) activities")
-        for activity in activities {
-            print([
-                activity.status.rawValue,
-                activity.toolName,
-                activity.projectName ?? "",
-                activity.windowTitle ?? "",
-                activity.commandLine ?? ""
-            ].joined(separator: "\t"))
-        }
         NSApp.terminate(nil)
     }
 

@@ -600,14 +600,14 @@ struct ActivityRowView: View {
                             .background(Color(nsColor: .quaternaryLabelColor).opacity(0.18), in: Capsule())
                     }
 
-                    Text(activity.subtitle)
+                    Text(activity.displaySubtitle)
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
 
                     HStack(spacing: 6) {
-                        if let title = activity.windowTitle, title != activity.subtitle {
-                            Text(title)
+                        if let detail = activity.displayDetail {
+                            Text(detail)
                                 .font(.system(size: 10))
                                 .foregroundStyle(.tertiary)
                                 .lineLimit(1)
