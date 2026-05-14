@@ -22,11 +22,24 @@ struct FloatingWidgetView: View {
     @ObservedObject var store: ActivityStore
     @ObservedObject var petLibrary: PetLibrary
     @State private var showsPopover = false
+    @State private var manualStateOverride: PetAnimationState? = nil
+    @State private var globalEventMonitor: Any?
 
     var body: some View {
+        let displayState = manualStateOverride ?? store.petState
+
         VStack(alignment: .leading, spacing: 0) {
-            PetMascotView(pack: petLibrary.selectedPack, state: store.petState)
+            PetMascotView(pack: petLibrary.selectedPack, state: displayState)
                 .frame(width: 162, height: 182)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    showsPopover = false
+                    let allStates = PetAnimationState.allCases
+                    let currentState = manualStateOverride ?? store.petState
+                    let currentIndex = allStates.firstIndex(of: currentState) ?? 0
+                    let nextIndex = (currentIndex + 1) % allStates.count
+                    manualStateOverride = allStates[nextIndex]
+                }
                 .overlay(alignment: .topTrailing) {
                     Button {
                         showsPopover.toggle()
@@ -39,6 +52,18 @@ struct FloatingWidgetView: View {
                     .buttonStyle(.plain)
                     .popover(isPresented: $showsPopover, arrowEdge: .trailing) {
                         SessionPopoverView(store: store)
+                    }
+                    .onChange(of: showsPopover) { isShown in
+                        if isShown {
+                            globalEventMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { _ in
+                                showsPopover = false
+                            }
+                        } else {
+                            if let monitor = globalEventMonitor {
+                                NSEvent.removeMonitor(monitor)
+                                globalEventMonitor = nil
+                            }
+                        }
                     }
                     .help("Show detected sessions")
                     .offset(x: -10, y: 18)
@@ -460,11 +485,11 @@ private struct CommunityPetPreviewView: View {
 
 private struct SessionPopoverView: View {
     @ObservedObject var store: ActivityStore
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
-                statusDots
                 VStack(alignment: .leading, spacing: 2) {
                     Text(summary)
                         .font(.system(size: 13, weight: .semibold))
@@ -519,22 +544,9 @@ private struct SessionPopoverView: View {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(Color(nsColor: .separatorColor).opacity(0.30), lineWidth: 1)
         )
-    }
-
-    private var statusDots: some View {
-        HStack(spacing: 4) {
-            Circle()
-                .fill(Color(nsColor: ActivityStatus.working.systemColor))
-                .frame(width: 8, height: 8)
-                .opacity(store.workingCount > 0 ? 1 : 0.25)
-            Circle()
-                .fill(Color(nsColor: ActivityStatus.waiting.systemColor))
-                .frame(width: 8, height: 8)
-                .opacity(store.waitingCount > 0 ? 1 : 0.25)
-            Circle()
-                .fill(Color(nsColor: ActivityStatus.done.systemColor))
-                .frame(width: 8, height: 8)
-                .opacity(store.doneCount > 0 ? 1 : 0.25)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            dismiss()
         }
     }
 
