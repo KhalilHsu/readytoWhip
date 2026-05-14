@@ -83,12 +83,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     // MARK: - Screen Recording permission (needed by CGWindowListCopyWindowInfo for window titles)
 
     private func promptForScreenRecordingIfNeeded() {
-        // CGPreflightScreenCaptureAccess returns true when already authorised (macOS 10.15+)
-        if #available(macOS 10.15, *) {
-            guard !CGPreflightScreenCaptureAccess() else { return }
-        } else {
-            return  // Older macOS doesn't gate this
-        }
+        // CGPreflightScreenCaptureAccess() is unreliable on some macOS versions —
+        // it can return false even when permission is granted. Instead, do an
+        // actual functional test: try reading window titles from other processes.
+        // If we can read at least one non-nil kCGWindowName from another app,
+        // permission is effectively granted.
+        guard !canReadWindowTitles() else { return }
 
         let alert = NSAlert()
         alert.alertStyle = .informational
@@ -103,6 +103,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
                 NSWorkspace.shared.open(url)
             }
+        }
+    }
+
+    /// Functional test: can we actually read window titles from other processes?
+    /// More reliable than CGPreflightScreenCaptureAccess() which lies on some macOS versions.
+    private func canReadWindowTitles() -> Bool {
+        let myPID = ProcessInfo.processInfo.processIdentifier
+        let options = CGWindowListOption([.optionOnScreenOnly, .excludeDesktopElements])
+        guard let windows = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
+            return false
+        }
+        return windows.contains { info in
+            guard let pid = info[kCGWindowOwnerPID as String] as? Int32, pid != myPID else {
+                return false
+            }
+            // If we can read a non-nil window name from another process, permission is granted
+            return info[kCGWindowName as String] as? String != nil
         }
     }
 }

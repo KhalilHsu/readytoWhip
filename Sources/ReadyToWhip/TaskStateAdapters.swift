@@ -357,50 +357,65 @@ private final class AntigravityTaskStateAdapter: ToolStateAdapter, @unchecked Se
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Antigravity").path
     }
 
+    /// Detect active Antigravity sessions using LOG CONTENT as the primary signal
+    /// (modeled after Codex's structured-data approach), not CPU heuristics.
     func detect(context: AppRuntimeContext) -> [AIActivity] {
         let appPID = context.antigravityPID
-        let processes = context.processes
-        let languageProcesses = processes.filter { $0.commandLine.contains("language_server_macos") }
+
+        // App must be running
+        guard appPID != nil else { return [] }
+
         let logSignal = latestLogSignal()
         let signalAge = logSignal.lastSignalDate.map { Date().timeIntervalSince($0) } ?? .greatestFiniteMagnitude
 
-        guard appPID != nil || !languageProcesses.isEmpty || (logSignal.isExplicitAgentWork && signalAge <= 5 * 60) else {
+        // Must have recent agent activity — if no log signal within 10 minutes, nothing to show
+        guard signalAge <= 10 * 60 else { return [] }
+
+        // Find the active workspace
+        let allWorkspaces = workspaces()
+        guard !allWorkspaces.isEmpty else { return [] }
+
+        // Try window title matching first
+        let windows = appWindows(appPID: appPID!, ownerHint: "Antigravity", windows: context.windows)
+        let activeWindowTitles = windows.compactMap(\.title).filter { isMeaningfulWindowTitle($0) }
+        let windowMatched = allWorkspaces.filter { workspace in
+            activeWindowTitles.contains { title in
+                title.localizedCaseInsensitiveContains(workspace.name)
+                    || title.localizedCaseInsensitiveContains(workspace.folderPath)
+            }
+        }
+
+        // Use window-matched workspace, or fall back to most recently modified
+        // (logs are global; the active workspace is the one being edited right now)
+        let activeWorkspace: AntigravityWorkspace
+        if let matched = windowMatched.first {
+            activeWorkspace = matched
+        } else if let recent = allWorkspaces
+            .sorted(by: { $0.modifiedAt > $1.modifiedAt })
+            .first {
+            activeWorkspace = recent
+        } else {
             return []
         }
 
-        let windows = appPID.map { appWindows(appPID: $0, ownerHint: "Antigravity", windows: context.windows) } ?? []
-        let activeWindowTitles = windows.compactMap(\.title).filter { isMeaningfulWindowTitle($0) }
-        let workspaces = workspaces()
-        let selectedWorkspaces = visibleAntigravityWorkspaces(
-            workspaces: workspaces,
-            windows: activeWindowTitles,
-            languageProcesses: languageProcesses,
-            signal: logSignal,
-            appRunning: appPID != nil
-        )
+        // Determine status purely from log signals
+        let status = antigravityStatus(signal: logSignal)
+        guard status != .idle else { return [] }
 
-        return selectedWorkspaces.compactMap { workspace in
-            let process = languageServerProcess(for: workspace, processes: languageProcesses)
-            let status = antigravityStatus(workspace: workspace, process: process, signal: logSignal)
-            guard status != .idle else { return nil }
+        let lastUpdated = logSignal.lastSignalDate ?? logSignal.date ?? Date()
 
-            let lastUpdated = max(workspace.modifiedAt, logSignal.lastSignalDate ?? logSignal.date ?? .distantPast)
-            let activeFile = activeFilename(storageID: workspace.storageID)
-            let title = activeFile ?? bestSessionTitle(from: activeWindowTitles) ?? workspace.name
-
-            return AIActivity(
-                id: "antigravity-workspace-\(workspace.storageID)",
-                toolName: "Antigravity",
-                bundleIdentifier: "com.google.antigravity",
-                processIdentifier: process?.pid ?? appPID ?? -1,
-                source: .desktopApp,
-                status: status,
-                projectName: workspace.name,
-                windowTitle: status == .failed ? logSignal.summary : title,
-                commandLine: process.map { "language server pid \($0.pid) · cpu \(String(format: "%.1f", $0.cpu))%" } ?? logSignal.detail,
-                lastUpdated: lastUpdated == .distantPast ? Date() : lastUpdated
-            )
-        }
+        return [AIActivity(
+            id: "antigravity-workspace-\(activeWorkspace.storageID)",
+            toolName: "Antigravity",
+            bundleIdentifier: "com.google.antigravity",
+            processIdentifier: appPID ?? -1,
+            source: .desktopApp,
+            status: status,
+            projectName: activeWorkspace.name,
+            windowTitle: logSignal.summary,
+            commandLine: logSignal.detail,
+            lastUpdated: lastUpdated
+        )]
     }
 
     private func activeFilename(storageID: String) -> String? {
@@ -475,165 +490,72 @@ private final class AntigravityTaskStateAdapter: ToolStateAdapter, @unchecked Se
         .filter { !$0.name.isEmpty }
     }
 
-    private func visibleAntigravityWorkspaces(
-        workspaces: [AntigravityWorkspace],
-        windows: [String],
-        languageProcesses: [ProcessSnapshot],
-        signal: AntigravityLogSignal,
-        appRunning: Bool
-    ) -> [AntigravityWorkspace] {
-        let processMatched = workspaces.filter { languageServerProcess(for: $0, processes: languageProcesses) != nil }
-        if !processMatched.isEmpty {
-            return Array(processMatched.prefix(4))
-        }
-
-        let windowMatched = workspaces.filter { workspace in
-            windows.contains { title in
-                title.localizedCaseInsensitiveContains(workspace.name)
-                    || title.localizedCaseInsensitiveContains(workspace.folderPath)
-            }
-        }
-        if !windowMatched.isEmpty {
-            return Array(windowMatched.prefix(4))
-        }
-
-        let signalAge = signal.lastSignalDate.map { Date().timeIntervalSince($0) } ?? .greatestFiniteMagnitude
-        if signal.isExplicitAgentWork && signalAge <= 10 * 60,
-           let recent = workspaces.sorted(by: { $0.modifiedAt > $1.modifiedAt }).first {
-            return [recent]
-        }
-
-        if appRunning, !windows.isEmpty,
-           let recent = workspaces.sorted(by: { $0.modifiedAt > $1.modifiedAt }).first {
-            return [recent]
-        }
-
-        if appRunning,
-           let recent = workspaces.sorted(by: { $0.modifiedAt > $1.modifiedAt }).first,
-           Date().timeIntervalSince(recent.modifiedAt) <= 30 * 60 {
-            return [recent]
-        }
-
-        return []
-    }
+    // MARK: - Log signal reading
 
     private func latestLogSignal() -> AntigravityLogSignal {
-        let candidates = latestLogFiles()
-        var best = AntigravityLogSignal(
-            date: nil,
-            summary: "No recent agent log",
-            detail: nil,
-            containsFatalError: false,
-            isExplicitAgentWork: false,
-            lastSignalDate: nil
-        )
-
-        for path in candidates {
-            guard let attrs = try? FileManager.default.attributesOfItem(atPath: path),
-                  let modified = attrs[.modificationDate] as? Date
-            else {
-                continue
-            }
-
-            let tail = tailText(path: path, maxBytes: 32_000)
-            let isFatal = tail.localizedCaseInsensitiveContains("UNAVAILABLE")
-                || tail.localizedCaseInsensitiveContains("No capacity available")
-                || tail.localizedCaseInsensitiveContains("quota exceeded")
-            
-            let (summary, lastSignalDate) = summarizeAntigravityLogWithDate(tail: tail, fileModified: modified)
-            let isNewer = modified > (best.date ?? .distantPast)
-            let hasExplicitWork = tail.localizedCaseInsensitiveContains("planner_generator")
-                || tail.localizedCaseInsensitiveContains("Requesting planner")
-                || tail.localizedCaseInsensitiveContains("streamGenerateContent")
-                || tail.localizedCaseInsensitiveContains("consumeAgentStateStream")
-
-            best = AntigravityLogSignal(
-                date: isNewer ? modified : best.date,
-                summary: isNewer ? summary : best.summary,
-                detail: isNewer ? URL(fileURLWithPath: path).lastPathComponent : best.detail,
-                containsFatalError: best.containsFatalError || isFatal,
-                isExplicitAgentWork: best.isExplicitAgentWork || hasExplicitWork,
-                lastSignalDate: newerDate(best.lastSignalDate, lastSignalDate)
-            )
-        }
-
-        return best
-    }
-
-    private func latestLogFiles() -> [String] {
+        // Prioritize ls-main.log — it has the richest AI activity signals
         let logsRoot = "\(supportRoot)/logs"
         guard let sessions = try? FileManager.default.contentsOfDirectory(atPath: logsRoot) else {
-            return []
+            return AntigravityLogSignal(date: nil, summary: "No logs", detail: nil, lastSignalDate: nil)
         }
 
-        return sessions
-            .sorted(by: >)
-            .prefix(3)
-            .flatMap { session -> [String] in
-                let sessionRoot = "\(logsRoot)/\(session)"
-                var files = [
-                    "\(sessionRoot)/cloudcode.log",
-                    "\(sessionRoot)/agent-window-console.log",
-                    "\(sessionRoot)/ls-main.log"
-                ]
+        // Only check the most recent session
+        guard let latestSession = sessions.sorted(by: >).first else {
+            return AntigravityLogSignal(date: nil, summary: "No logs", detail: nil, lastSignalDate: nil)
+        }
 
-                if let windows = try? FileManager.default.contentsOfDirectory(atPath: sessionRoot) {
-                    for window in windows where window.hasPrefix("window") {
-                        files.append("\(sessionRoot)/\(window)/exthost/google.antigravity/Antigravity.log")
-                    }
-                }
-
-                return files
+        let sessionRoot = "\(logsRoot)/\(latestSession)"
+        // ls-main.log is the primary signal source (contains planner_generator, streamGenerateContent)
+        let primaryLog = "\(sessionRoot)/ls-main.log"
+        if FileManager.default.fileExists(atPath: primaryLog) {
+            let signal = parseLogFile(path: primaryLog)
+            if signal.lastSignalDate != nil {
+                return signal
             }
-            .filter { FileManager.default.fileExists(atPath: $0) }
-    }
+        }
 
-    private func languageServerProcess(for workspace: AntigravityWorkspace, processes: [ProcessSnapshot]) -> ProcessSnapshot? {
-        let workspaceID = "file" + workspace.folderPath.replacingOccurrences(of: "/", with: "_")
-        return processes
-            .filter { process in
-                process.commandLine.contains("language_server_macos")
-                    && process.commandLine.contains("--workspace_id \(workspaceID)")
+        // Fallback: check other log files
+        let fallbackFiles = [
+            "\(sessionRoot)/cloudcode.log",
+            "\(sessionRoot)/agent-window-console.log"
+        ]
+        for path in fallbackFiles where FileManager.default.fileExists(atPath: path) {
+            let signal = parseLogFile(path: path)
+            if signal.lastSignalDate != nil {
+                return signal
             }
-            .sorted { $0.cpu > $1.cpu }
-            .first
+        }
+
+        return AntigravityLogSignal(date: nil, summary: "No recent activity", detail: nil, lastSignalDate: nil)
     }
 
-    private func antigravityStatus(workspace: AntigravityWorkspace, process: ProcessSnapshot?, signal: AntigravityLogSignal) -> ActivityStatus {
-        let workspaceAge = Date().timeIntervalSince(workspace.modifiedAt)
-        let logAge = signal.date.map { Date().timeIntervalSince($0) } ?? .greatestFiniteMagnitude
-        let signalAge = signal.lastSignalDate.map { Date().timeIntervalSince($0) } ?? .greatestFiniteMagnitude
-
-        if logAge <= 5 * 60 && signal.containsFatalError {
-            return .failed
-        }
-        
-        let isThinking = signal.summary.contains("Thinking") || signal.summary.contains("Generating")
-        if signal.isExplicitAgentWork && signalAge <= 2 * 60 && isThinking {
-            return .working
+    /// Parse a single log file and extract the most recent meaningful signal.
+    private func parseLogFile(path: String) -> AntigravityLogSignal {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: path),
+              let modified = attrs[.modificationDate] as? Date
+        else {
+            return AntigravityLogSignal(date: nil, summary: "Unreadable", detail: nil, lastSignalDate: nil)
         }
 
-        if let process, process.cpu >= 10.0 { 
-            return .working
-        }
+        let tail = tailText(path: path, maxBytes: 48_000)
+        // Scan last 200 lines (not 50) to avoid signals being buried under noise
+        let lines = tail.split(separator: "\n").suffix(200).map(String.init).reversed()
 
-        if signal.isExplicitAgentWork && signalAge > 2 * 60 && signalAge <= 15 * 60 && process == nil {
-            return .done
-        }
-        if process != nil || workspaceAge <= 10 * 60 {
-            return .waiting
-        }
-        return .idle
-    }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
 
-    private func summarizeAntigravityLogWithDate(tail: String, fileModified: Date) -> (String, Date?) {
-        let lines = tail.split(separator: "\n").suffix(50).map(String.init).reversed()
         for line in lines {
-            let status: String? = {
-                if line.localizedCaseInsensitiveContains("UNAVAILABLE") || line.localizedCaseInsensitiveContains("No capacity") {
+            // Only process lines with actual signal keywords — skip noise
+            let signal: String? = {
+                if line.localizedCaseInsensitiveContains("UNAVAILABLE")
+                    || line.localizedCaseInsensitiveContains("No capacity") {
                     return "No model capacity"
                 }
-                if line.localizedCaseInsensitiveContains("Requesting planner") || line.localizedCaseInsensitiveContains("planner_generator") {
+                if line.localizedCaseInsensitiveContains("quota exceeded") {
+                    return "Quota exceeded"
+                }
+                if line.localizedCaseInsensitiveContains("Requesting planner")
+                    || line.localizedCaseInsensitiveContains("planner_generator") {
                     return "Thinking..."
                 }
                 if line.localizedCaseInsensitiveContains("streamGenerateContent") {
@@ -645,20 +567,59 @@ private final class AntigravityTaskStateAdapter: ToolStateAdapter, @unchecked Se
                 return nil
             }()
 
-            if let status {
-                // Try to parse timestamp: 2026-05-05 12:14:46.965
-                let timestamp = line.prefix(23)
-                let formatter = DateFormatter()
-                formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
-                if let date = formatter.date(from: String(timestamp)) {
-                    return (status, date)
-                }
-                return (status, fileModified)
-            }
+            guard let signal else { continue }
+
+            // Parse timestamp from the beginning of the line: "2026-05-14 15:31:17.308 ..."
+            let timestamp = String(line.prefix(23))
+            let signalDate = formatter.date(from: timestamp)
+
+            return AntigravityLogSignal(
+                date: modified,
+                summary: signal,
+                detail: URL(fileURLWithPath: path).lastPathComponent,
+                lastSignalDate: signalDate ?? modified
+            )
         }
-        return (lines.first?.nilIfBlank ?? "Antigravity", nil)
+
+        return AntigravityLogSignal(date: modified, summary: "No recent activity", detail: nil, lastSignalDate: nil)
+    }
+
+    // MARK: - Status determination (purely log-based, no CPU)
+
+    /// Determine status purely from log content and recency.
+    /// Modeled after Codex's approach of reading structured event data.
+    private func antigravityStatus(signal: AntigravityLogSignal) -> ActivityStatus {
+        let signalAge = signal.lastSignalDate.map { Date().timeIntervalSince($0) } ?? .greatestFiniteMagnitude
+        // How recently the log FILE was written to (not the signal timestamp inside it)
+        let fileAge = signal.date.map { Date().timeIntervalSince($0) } ?? .greatestFiniteMagnitude
+
+        // 1. Error in the most recent signal
+        let isError = signal.summary.contains("No model capacity")
+            || signal.summary.contains("Quota exceeded")
+        if isError && signalAge <= 5 * 60 {
+            return .failed
+        }
+
+        // 2. Active AI work — the log file is STILL being written to (within 30 seconds)
+        //    Unlike Codex which has "task_complete" events, Antigravity logs just stop
+        //    writing when done. So file-modification recency = liveness.
+        let isWorkSignal = signal.summary.contains("Thinking")
+            || signal.summary.contains("Generating")
+            || signal.summary.contains("Agent stream active")
+        if isWorkSignal && fileAge <= 30 {
+            return .working
+        }
+
+        // 3. Had work recently, log file stopped being written → done
+        if isWorkSignal && signalAge <= 10 * 60 {
+            return .done
+        }
+
+        // 4. No recent signal → idle
+        return .idle
     }
 }
+
 
 private final class GeminiTaskStateAdapter: ToolStateAdapter, @unchecked Sendable {
     private var tmpRoot: String {
@@ -782,8 +743,6 @@ private struct AntigravityLogSignal {
     let date: Date?
     let summary: String
     let detail: String?
-    let containsFatalError: Bool
-    let isExplicitAgentWork: Bool
     let lastSignalDate: Date?
 }
 
