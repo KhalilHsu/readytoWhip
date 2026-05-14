@@ -1,5 +1,4 @@
 import AppKit
-import ApplicationServices
 import SwiftUI
 
 @MainActor
@@ -9,7 +8,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private var statusItem: NSStatusItem?
     private var panelController: FloatingPanelController?
     private var settingsWindow: NSWindow?
-    private var didPromptAccessibility = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -18,7 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         createFloatingPanel()
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
-            self?.promptForAccessibilityIfNeeded()
+            self?.promptForScreenRecordingIfNeeded()
         }
     }
 
@@ -82,27 +80,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         NSApp.terminate(nil)
     }
 
-    private func promptForAccessibilityIfNeeded() {
-        guard !didPromptAccessibility else { return }
-        guard !AXIsProcessTrusted() else { return }
-        didPromptAccessibility = true
+    // MARK: - Screen Recording permission (needed by CGWindowListCopyWindowInfo for window titles)
 
-        let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
-        _ = AXIsProcessTrustedWithOptions(options)
+    private func promptForScreenRecordingIfNeeded() {
+        // CGPreflightScreenCaptureAccess returns true when already authorised (macOS 10.15+)
+        if #available(macOS 10.15, *) {
+            guard !CGPreflightScreenCaptureAccess() else { return }
+        } else {
+            return  // Older macOS doesn't gate this
+        }
 
         let alert = NSAlert()
         alert.alertStyle = .informational
-        alert.messageText = "Accessibility Permission Needed"
-        alert.informativeText = "ReadyToWhip uses window titles and focused-window metadata to track live sessions. Without Accessibility permission, app and terminal detection may be incomplete."
+        alert.messageText = "Screen Recording Permission Needed"
+        alert.informativeText = "ReadyToWhip reads window titles to identify which projects your AI tools are working on. Without Screen Recording permission, project names may not appear correctly."
         alert.addButton(withTitle: "Open Settings")
-        alert.addButton(withTitle: "Later")
 
         NSApp.activate(ignoringOtherApps: true)
         let response = alert.runModal()
-        guard response == .alertFirstButtonReturn else { return }
 
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
-            NSWorkspace.shared.open(url)
+        if response == .alertFirstButtonReturn {
+            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
+                NSWorkspace.shared.open(url)
+            }
         }
     }
 }

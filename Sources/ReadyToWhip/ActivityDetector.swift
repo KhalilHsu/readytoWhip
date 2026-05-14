@@ -185,34 +185,6 @@ final class ActivityDetector {
         return Dictionary(grouping: snapshots, by: \.pid)
     }
 
-    private func getAccessibilityTitle(for pid: Int32) -> String? {
-        let appRef = AXUIElementCreateApplication(pid)
-        var value: CFTypeRef?
-        
-        // 尝试获取主窗口
-        let result = AXUIElementCopyAttributeValue(appRef, kAXFocusedWindowAttribute as CFString, &value)
-        if result == .success, let windowRef = value as! AXUIElement? {
-            var titleValue: CFTypeRef?
-            let titleResult = AXUIElementCopyAttributeValue(windowRef, kAXTitleAttribute as CFString, &titleValue)
-            if titleResult == .success, let title = titleValue as? String {
-                return title
-            }
-        }
-        
-        // 如果没有焦点窗口，尝试遍历所有窗口
-        var windowListValue: CFTypeRef?
-        let listResult = AXUIElementCopyAttributeValue(appRef, kAXWindowsAttribute as CFString, &windowListValue)
-        if listResult == .success, let windows = windowListValue as? [AXUIElement], let firstWindow = windows.first {
-            var titleValue: CFTypeRef?
-            let titleResult = AXUIElementCopyAttributeValue(firstWindow, kAXTitleAttribute as CFString, &titleValue)
-            if titleResult == .success, let title = titleValue as? String {
-                return title
-            }
-        }
-        
-        return nil
-    }
-
     private func collectProcesses() -> [ProcessSnapshot] {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/ps")
