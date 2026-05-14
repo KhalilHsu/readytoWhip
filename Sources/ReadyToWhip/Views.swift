@@ -53,7 +53,7 @@ struct FloatingWidgetView: View {
                     .popover(isPresented: $showsPopover, arrowEdge: .trailing) {
                         SessionPopoverView(store: store)
                     }
-                    .onChange(of: showsPopover) { isShown in
+                    .onChange(of: showsPopover) { _, isShown in
                         if isShown {
                             globalEventMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { _ in
                                 showsPopover = false
