@@ -64,17 +64,17 @@ final class PetLibrary: ObservableObject {
     }
 
     func revealPetsFolder() {
-        let directory = Self.communityPetsDirectory()
+        let directory = Self.externalPetsDirectory()
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         NSWorkspace.shared.activateFileViewerSelecting([directory])
     }
 
-    static func communityPetsDirectory() -> URL {
+    static func externalPetsDirectory() -> URL {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/ReadyToWhip/Pets", isDirectory: true)
     }
 
-    static func codexPetsDirectory() -> URL {
+    static func legacyCodexPetsDirectory() -> URL {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".codex/pets", isDirectory: true)
     }
@@ -133,27 +133,45 @@ final class PetLibrary: ObservableObject {
     }
 
     private static func loadExternalPacks() -> [PetPackManifest] {
-        let directories = [communityPetsDirectory(), codexPetsDirectory()]
-        try? FileManager.default.createDirectory(at: communityPetsDirectory(), withIntermediateDirectories: true)
+        let directory = externalPetsDirectory()
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        migrateLegacyPacksIfNeeded(into: directory)
         var discovered: [String: PetPackManifest] = [:]
 
-        for directory in directories {
-            guard let children = try? FileManager.default.contentsOfDirectory(
-                at: directory,
-                includingPropertiesForKeys: nil,
-                options: [.skipsHiddenFiles]
-            ) else {
-                continue
-            }
+        guard let children = try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) else {
+            return []
+        }
 
-            for url in children {
-                guard let pack = loadPack(at: url) else { continue }
-                discovered[pack.id] = pack
-            }
+        for url in children {
+            guard let pack = loadPack(at: url) else { continue }
+            discovered[pack.id] = pack
         }
 
         return Array(discovered.values)
             .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+    }
+
+    private static func migrateLegacyPacksIfNeeded(into directory: URL) {
+        let legacyDirectory = legacyCodexPetsDirectory()
+        guard legacyDirectory != directory,
+              let children = try? FileManager.default.contentsOfDirectory(
+                  at: legacyDirectory,
+                  includingPropertiesForKeys: nil,
+                  options: [.skipsHiddenFiles]
+              )
+        else {
+            return
+        }
+
+        for sourceURL in children {
+            let destinationURL = directory.appendingPathComponent(sourceURL.lastPathComponent, isDirectory: true)
+            guard !FileManager.default.fileExists(atPath: destinationURL.path) else { continue }
+            try? FileManager.default.copyItem(at: sourceURL, to: destinationURL)
+        }
     }
 
     private static func loadPack(at url: URL) -> PetPackManifest? {
