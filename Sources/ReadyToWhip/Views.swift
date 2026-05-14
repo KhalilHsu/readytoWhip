@@ -21,9 +21,17 @@ private final class SpriteSheetCache {
 struct FloatingWidgetView: View {
     @ObservedObject var store: ActivityStore
     @ObservedObject var petLibrary: PetLibrary
-    @State private var showsPopover = false
     @State private var manualStateOverride: PetAnimationState? = nil
     @State private var globalEventMonitor: Any?
+    @State private var lastToggleTime: Date = .distantPast
+
+    private func togglePopover() {
+        let now = Date()
+        // Prevent rapid toggling that could cause multiple popovers/windows to spawn
+        guard now.timeIntervalSince(lastToggleTime) > 0.3 else { return }
+        lastToggleTime = now
+        store.showsPopover.toggle()
+    }
 
     var body: some View {
         let displayState = manualStateOverride ?? store.petState
@@ -33,7 +41,7 @@ struct FloatingWidgetView: View {
                 .frame(width: 162, height: 182)
                 .contentShape(Rectangle())
                 .onTapGesture {
-                    showsPopover = false
+                    store.showsPopover = false
                     let allStates = PetAnimationState.allCases
                     let currentState = manualStateOverride ?? store.petState
                     let currentIndex = allStates.firstIndex(of: currentState) ?? 0
@@ -41,29 +49,16 @@ struct FloatingWidgetView: View {
                     manualStateOverride = allStates[nextIndex]
                 }
                 .overlay(alignment: .topTrailing) {
-                    Button {
-                        showsPopover.toggle()
-                    } label: {
-                        PetBadgeView(
-                            count: store.activeCount,
-                            accentColor: Color(nsColor: store.petState.accentColor)
-                        )
+                    PetBadgeView(
+                        count: store.activeCount,
+                        accentColor: Color(nsColor: store.petState.accentColor)
+                    )
+                    .contentShape(Circle())
+                    .onTapGesture {
+                        togglePopover()
                     }
-                    .buttonStyle(.plain)
-                    .popover(isPresented: $showsPopover, arrowEdge: .trailing) {
+                    .popover(isPresented: $store.showsPopover, arrowEdge: .trailing) {
                         SessionPopoverView(store: store)
-                    }
-                    .onChange(of: showsPopover) { _, isShown in
-                        if isShown {
-                            globalEventMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { _ in
-                                showsPopover = false
-                            }
-                        } else {
-                            if let monitor = globalEventMonitor {
-                                NSEvent.removeMonitor(monitor)
-                                globalEventMonitor = nil
-                            }
-                        }
                     }
                     .help("Show detected sessions")
                     .offset(x: -10, y: 18)
@@ -72,6 +67,18 @@ struct FloatingWidgetView: View {
         .padding(.horizontal, 4)
         .padding(.vertical, 6)
         .frame(width: 180)
+        .onChange(of: store.showsPopover) { _, isShown in
+            if isShown {
+                globalEventMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { _ in
+                    store.showsPopover = false
+                }
+            } else {
+                if let monitor = globalEventMonitor {
+                    NSEvent.removeMonitor(monitor)
+                    globalEventMonitor = nil
+                }
+            }
+        }
     }
 }
 

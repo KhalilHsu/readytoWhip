@@ -7,6 +7,7 @@ final class ActivityStore: ObservableObject {
     @Published private(set) var activities: [AIActivity] = []
     @Published var isExpanded = false
     @Published var lastRefresh: Date?
+    @Published var showsPopover = false
 
     private let detector = ActivityDetector()
     private var timer: Timer?
