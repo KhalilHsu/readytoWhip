@@ -83,11 +83,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     // MARK: - Screen Recording permission (needed by CGWindowListCopyWindowInfo for window titles)
 
     private func promptForScreenRecordingIfNeeded() {
-        // CGPreflightScreenCaptureAccess() is unreliable on some macOS versions —
-        // it can return false even when permission is granted. Instead, do an
-        // actual functional test: try reading window titles from other processes.
-        // If we can read at least one non-nil kCGWindowName from another app,
-        // permission is effectively granted.
+        // First check standard API. If it returns true, we definitely have permission.
+        // If it returns false, it might be the macOS 14+ bug, so we fallback to the heuristic test.
+        if CGPreflightScreenCaptureAccess() { return }
         guard !canReadWindowTitles() else { return }
 
         let alert = NSAlert()
@@ -95,6 +93,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         alert.messageText = "Screen Recording Permission Needed"
         alert.informativeText = "ReadyToWhip reads window titles to identify which projects your AI tools are working on. Without Screen Recording permission, project names may not appear correctly."
         alert.addButton(withTitle: "Open Settings")
+        alert.addButton(withTitle: "Later")
 
         NSApp.activate(ignoringOtherApps: true)
         let response = alert.runModal()
@@ -106,11 +105,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         }
     }
 
-    /// Functional test: can we actually read window titles from other processes?
-    /// More reliable than CGPreflightScreenCaptureAccess() which lies on some macOS versions.
+    /// Functional test fallback: can we actually read window titles from other processes?
     private func canReadWindowTitles() -> Bool {
         let myPID = ProcessInfo.processInfo.processIdentifier
-        let options = CGWindowListOption([.optionOnScreenOnly, .excludeDesktopElements])
+        // Use .optionAll to catch off-screen or hidden windows on empty desktops
+        let options = CGWindowListOption([.optionAll, .excludeDesktopElements])
         guard let windows = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
             return false
         }

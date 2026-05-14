@@ -632,9 +632,21 @@ private final class GeminiTaskStateAdapter: ToolStateAdapter, @unchecked Sendabl
 
         guard let userDirs = try? FileManager.default.contentsOfDirectory(atPath: tmpRoot) else { return [] }
         
-        var activities: [AIActivity] = []
+        // Collect all candidate sessions with their freshness
+        var candidates: [(userDir: String, sessionId: String, lastMsg: String, lastUpdate: Date, sessionPath: String?)] = []
+        
         for userDir in userDirs {
             let logsPath = "\(tmpRoot)/\(userDir)/logs.json"
+            guard let logsAttrs = try? FileManager.default.attributesOfItem(atPath: logsPath),
+                  let logsModDate = logsAttrs[.modificationDate] as? Date else {
+                continue
+            }
+            
+            // Skip sessions whose logs.json hasn't been touched in over 10 minutes
+            // — these are definitely not the active session
+            let logsAge = abs(logsModDate.timeIntervalSinceNow)
+            guard logsAge < 10 * 60 else { continue }
+            
             guard let data = FileManager.default.contents(atPath: logsPath),
                   let logs = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
                   let lastLog = logs.last,
@@ -646,41 +658,75 @@ private final class GeminiTaskStateAdapter: ToolStateAdapter, @unchecked Sendabl
             
             let formatter = ISO8601DateFormatter()
             formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            let lastLogDate = formatter.date(from: timestampStr) ?? Date()
+            let lastLogDate = formatter.date(from: timestampStr) ?? logsModDate
             
-            // Look for the session jsonl file to check if it's done
+            // Find the session chat file for more precise timing
             let chatsDir = "\(tmpRoot)/\(userDir)/chats"
-            var isWorking = false
-            var lastUpdate = lastLogDate
+            var lastUpdate = max(lastLogDate, logsModDate)
+            var sessionPath: String? = nil
             
-            if let chatFiles = try? FileManager.default.contentsOfDirectory(atPath: chatsDir) {
-                if let sessionFile = chatFiles.first(where: { $0.contains(sessionId) }) {
-                    let sessionPath = "\(chatsDir)/\(sessionFile)"
-                    if let attrs = try? FileManager.default.attributesOfItem(atPath: sessionPath),
-                       let modDate = attrs[.modificationDate] as? Date {
-                        lastUpdate = max(lastUpdate, modDate)
-                        let tail = tailText(path: sessionPath, maxBytes: 8000)
-                        if tail.contains("\"toolCalls\":") && !tail.contains("\"status\":\"success\"") {
-                            isWorking = true
-                        } else if tail.contains("thoughts") && !tail.contains("\"content\":") {
-                            isWorking = true
-                        } else if abs(modDate.timeIntervalSinceNow) < 5 {
-                            isWorking = true
-                        }
-                    }
+            if let chatFiles = try? FileManager.default.contentsOfDirectory(atPath: chatsDir),
+               let sessionFile = chatFiles.first(where: { $0.contains(sessionId) }) {
+                let path = "\(chatsDir)/\(sessionFile)"
+                sessionPath = path
+                if let attrs = try? FileManager.default.attributesOfItem(atPath: path),
+                   let modDate = attrs[.modificationDate] as? Date {
+                    lastUpdate = max(lastUpdate, modDate)
                 }
             }
             
-            let cpu = geminiProcesses.reduce(0) { $0 + $1.cpu }
-            if cpu > 1.0 {
-                isWorking = true
+            candidates.append((userDir, sessionId, lastMsg, lastUpdate, sessionPath))
+        }
+        
+        // No recent sessions → nothing to show
+        guard !candidates.isEmpty else { return [] }
+        
+        // Sort by most recent first — typically only one session is active
+        candidates.sort { $0.lastUpdate > $1.lastUpdate }
+        
+        var activities: [AIActivity] = []
+        for candidate in candidates {
+            let timeAge = abs(candidate.lastUpdate.timeIntervalSinceNow)
+            
+            // Determine working state from the session file content (not global CPU)
+            var isWorking = false
+            if let sessionPath = candidate.sessionPath {
+                let tail = tailText(path: sessionPath, maxBytes: 8000)
+                if tail.contains("\"toolCalls\":") && !tail.contains("\"status\":\"success\"") {
+                    isWorking = true
+                } else if tail.contains("thoughts") && !tail.contains("\"content\":") {
+                    isWorking = true
+                }
+                // Session file modified within 5 seconds → actively writing
+                if let attrs = try? FileManager.default.attributesOfItem(atPath: sessionPath),
+                   let modDate = attrs[.modificationDate] as? Date,
+                   abs(modDate.timeIntervalSinceNow) < 5 {
+                    isWorking = true
+                }
             }
             
-            // Read project root
-            var projectName = "Unknown Project"
+            let status: ActivityStatus
+            if isWorking || timeAge < 10 {
+                status = .working
+            } else if timeAge < 5 * 60 {
+                status = .done
+            } else {
+                // > 5 minutes old → not worth showing
+                continue
+            }
             
-            // Try to extract from the gemini node process CWD first
-            if let pid = geminiProcesses.first?.pid {
+            // Read project name
+            var projectName = "Unknown Project"
+            if let rootData = FileManager.default.contents(atPath: "\(tmpRoot)/\(candidate.userDir)/.project_root"),
+               let rootPath = String(data: rootData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) {
+                if rootPath == FileManager.default.homeDirectoryForCurrentUser.path {
+                    projectName = "Home (~)"
+                } else {
+                    projectName = URL(fileURLWithPath: rootPath).lastPathComponent
+                }
+            }
+            // Fallback to process CWD
+            if projectName == "Unknown Project", let pid = geminiProcesses.first?.pid {
                 if let cwd = getProcessCWD(pid: pid), cwd != "/" {
                     if cwd == FileManager.default.homeDirectoryForCurrentUser.path {
                         projectName = "Home (~)"
@@ -690,41 +736,17 @@ private final class GeminiTaskStateAdapter: ToolStateAdapter, @unchecked Sendabl
                 }
             }
             
-            // Fallback to .project_root file if CWD extraction fails
-            if projectName == "Unknown Project",
-               let rootData = FileManager.default.contents(atPath: "\(tmpRoot)/\(userDir)/.project_root"),
-               let rootPath = String(data: rootData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) {
-                if rootPath == FileManager.default.homeDirectoryForCurrentUser.path {
-                    projectName = "Home (~)"
-                } else {
-                    projectName = URL(fileURLWithPath: rootPath).lastPathComponent
-                }
-            }
-            
-            let timeAge = abs(lastUpdate.timeIntervalSinceNow)
-            let status: ActivityStatus
-            if isWorking || timeAge < 10 {
-                status = .working
-            } else if timeAge < 5 * 60 {
-                status = .done
-            } else if timeAge < 30 * 60 {
-                status = .waiting
-            } else {
-                status = .idle
-            }
-            guard status != .idle else { continue }
-            
             activities.append(AIActivity(
-                id: "gemini-\(sessionId)",
+                id: "gemini-\(candidate.sessionId)",
                 toolName: "Gemini CLI",
                 bundleIdentifier: nil,
                 processIdentifier: geminiProcesses.first?.pid ?? -1,
                 source: .cli,
                 status: status,
                 projectName: projectName,
-                windowTitle: lastMsg,
-                commandLine: "session \(sessionId.prefix(8)) · cpu \(String(format: "%.1f", cpu))%",
-                lastUpdated: lastUpdate
+                windowTitle: candidate.lastMsg,
+                commandLine: "session \(candidate.sessionId.prefix(8))",
+                lastUpdated: candidate.lastUpdate
             ))
         }
         

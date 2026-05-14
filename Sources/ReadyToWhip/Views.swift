@@ -42,9 +42,8 @@ struct FloatingWidgetView: View {
                 .contentShape(Rectangle())
                 .onTapGesture {
                     store.showsPopover = false
-                    let allStates = PetAnimationState.allCases
-                    let currentState = manualStateOverride ?? store.petState
-                    let currentIndex = allStates.firstIndex(of: currentState) ?? 0
+                    let allStates: [PetAnimationState?] = [nil] + PetAnimationState.allCases
+                    let currentIndex = allStates.firstIndex(of: manualStateOverride) ?? 0
                     let nextIndex = (currentIndex + 1) % allStates.count
                     manualStateOverride = allStates[nextIndex]
                 }
@@ -497,6 +496,7 @@ private struct SessionPopoverView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
+                statusDots
                 VStack(alignment: .leading, spacing: 2) {
                     Text(summary)
                         .font(.system(size: 13, weight: .semibold))
@@ -562,6 +562,23 @@ private struct SessionPopoverView: View {
             return "No AI activity"
         }
         return "\(store.workingCount) working · \(store.waitingCount) waiting"
+    }
+
+    private var statusDots: some View {
+        HStack(spacing: 4) {
+            Circle()
+                .fill(Color(nsColor: ActivityStatus.working.systemColor))
+                .frame(width: 8, height: 8)
+                .opacity(store.workingCount > 0 ? 1 : 0.25)
+            Circle()
+                .fill(Color(nsColor: ActivityStatus.waiting.systemColor))
+                .frame(width: 8, height: 8)
+                .opacity(store.waitingCount > 0 ? 1 : 0.25)
+            Circle()
+                .fill(Color(nsColor: ActivityStatus.done.systemColor))
+                .frame(width: 8, height: 8)
+                .opacity(store.doneCount > 0 ? 1 : 0.25)
+        }
     }
 }
 
