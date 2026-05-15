@@ -496,7 +496,6 @@ private struct SessionPopoverView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
-                statusDots
                 VStack(alignment: .leading, spacing: 2) {
                     Text(summary)
                         .font(.system(size: 13, weight: .semibold))
