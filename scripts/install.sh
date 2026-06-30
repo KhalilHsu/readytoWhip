@@ -12,6 +12,6 @@ pkill -x "$APP_NAME" 2>/dev/null || true
 rm -rf "$TARGET_APP"
 cp -R "$BUILT_APP" "$TARGET_APP"
 defaults write rip.readytowhip.activity selectedPetID -string whippy
-nohup "$TARGET_APP/Contents/MacOS/$APP_NAME" >/dev/null 2>&1 &
+nohup env READYTOWHIP_DEFAULT_CWD="$ROOT_DIR" "$TARGET_APP/Contents/MacOS/$APP_NAME" >/dev/null 2>&1 &
 
 echo "$TARGET_APP"

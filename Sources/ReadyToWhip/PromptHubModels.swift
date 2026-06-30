@@ -55,6 +55,7 @@ struct PromptCLITool: Identifiable, Hashable {
                 "-m", configuration.modelID,
                 "-c", "model_reasoning_effort=\(configuration.reasoningID)",
                 "--cd", workingDirectory.path,
+                "--skip-git-repo-check",
                 "--sandbox", "read-only",
                 "--color", "never",
                 prompt
