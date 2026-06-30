@@ -9,6 +9,40 @@ struct PromptCLIProcessLaunch {
     let process: Process
     let executablePath: String
     let commandPreview: String
+    let finalMessageURL: URL?
+}
+
+struct PromptCLITermination {
+    let status: Int32
+    let finalMessage: String?
+    let diagnosticOutput: String?
+}
+
+private final class PromptOutputCapture: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stdout = ""
+    private var stderr = ""
+
+    func append(_ text: String, stream: PromptOutputStream) {
+        lock.lock()
+        defer { lock.unlock() }
+        switch stream {
+        case .stdout:
+            stdout += text
+        case .stderr:
+            stderr += text
+        }
+    }
+
+    func diagnosticOutput() -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        return [stdout, stderr]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+            .nilIfBlank
+    }
 }
 
 enum PromptCLIRunnerError: LocalizedError {
@@ -39,13 +73,22 @@ final class PromptCLIRunner {
         workingDirectory: URL,
         configuration: PromptRunConfiguration,
         onOutput: @escaping @Sendable (PromptOutputStream, String) -> Void,
-        onTermination: @escaping @Sendable (Int32) -> Void
+        onTermination: @escaping @Sendable (PromptCLITermination) -> Void
     ) throws -> PromptCLIProcessLaunch {
         guard let executableURL = resolveExecutable(candidates: tool.executableCandidates) else {
             throw PromptCLIRunnerError.executableNotFound(tool.name, tool.executableCandidates)
         }
 
-        let arguments = tool.arguments(prompt: prompt, workingDirectory: workingDirectory, configuration: configuration)
+        let finalMessageURL = tool.capturesFinalMessage ? makeFinalMessageURL() : nil
+        if let finalMessageURL {
+            try? fileManager.removeItem(at: finalMessageURL)
+        }
+        let arguments = tool.arguments(
+            prompt: prompt,
+            workingDirectory: workingDirectory,
+            configuration: configuration,
+            finalMessageURL: finalMessageURL
+        )
         let process = Process()
         process.executableURL = executableURL
         process.arguments = arguments
@@ -58,22 +101,44 @@ final class PromptCLIRunner {
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
 
+        let outputCapture = PromptOutputCapture()
+
         stdoutPipe.fileHandleForReading.readabilityHandler = { handle in
             let data = handle.availableData
             guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
-            onOutput(.stdout, Self.cleanedOutput(text))
+            let cleaned = Self.cleanedOutput(text)
+            outputCapture.append(cleaned, stream: .stdout)
+            if tool.streamsLiveOutput {
+                onOutput(.stdout, cleaned)
+            }
         }
 
         stderrPipe.fileHandleForReading.readabilityHandler = { handle in
             let data = handle.availableData
             guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
-            onOutput(.stderr, Self.cleanedOutput(text))
+            let cleaned = Self.cleanedOutput(text)
+            outputCapture.append(cleaned, stream: .stderr)
+            if tool.streamsLiveOutput {
+                onOutput(.stderr, cleaned)
+            }
         }
 
         process.terminationHandler = { finishedProcess in
             stdoutPipe.fileHandleForReading.readabilityHandler = nil
             stderrPipe.fileHandleForReading.readabilityHandler = nil
-            onTermination(finishedProcess.terminationStatus)
+
+            let finalMessage = finalMessageURL.flatMap { url -> String? in
+                guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+                try? FileManager.default.removeItem(at: url)
+                return text.trimmingCharacters(in: .whitespacesAndNewlines).nilIfBlank
+            }
+            onTermination(
+                PromptCLITermination(
+                    status: finishedProcess.terminationStatus,
+                    finalMessage: finalMessage,
+                    diagnosticOutput: outputCapture.diagnosticOutput()
+                )
+            )
         }
 
         do {
@@ -85,7 +150,8 @@ final class PromptCLIRunner {
         return PromptCLIProcessLaunch(
             process: process,
             executablePath: executableURL.path,
-            commandPreview: commandPreview(executablePath: executableURL.path, arguments: arguments)
+            commandPreview: commandPreview(executablePath: executableURL.path, arguments: arguments),
+            finalMessageURL: finalMessageURL
         )
     }
 
@@ -152,6 +218,11 @@ final class PromptCLIRunner {
         environment["NO_COLOR"] = "1"
         environment["CLICOLOR"] = "0"
         return environment
+    }
+
+    private func makeFinalMessageURL() -> URL {
+        fileManager.temporaryDirectory
+            .appendingPathComponent("readytowhip-\(UUID().uuidString)-last-message.txt")
     }
 
     private func commandPreview(executablePath: String, arguments: [String]) -> String {

@@ -41,7 +41,20 @@ struct PromptCLITool: Identifiable, Hashable {
     let accentColor: NSColor
     let executableCandidates: [String]
 
-    func arguments(prompt: String, workingDirectory: URL, configuration: PromptRunConfiguration) -> [String] {
+    var capturesFinalMessage: Bool {
+        id == .codex
+    }
+
+    var streamsLiveOutput: Bool {
+        id != .codex
+    }
+
+    func arguments(
+        prompt: String,
+        workingDirectory: URL,
+        configuration: PromptRunConfiguration,
+        finalMessageURL: URL?
+    ) -> [String] {
         switch id {
         case .antigravity:
             return [
@@ -49,7 +62,7 @@ struct PromptCLITool: Identifiable, Hashable {
                 "--print", prompt
             ]
         case .codex:
-            return [
+            var arguments = [
                 "exec",
                 "--ignore-user-config",
                 "-m", configuration.modelID,
@@ -60,6 +73,10 @@ struct PromptCLITool: Identifiable, Hashable {
                 "--color", "never",
                 prompt
             ]
+            if let finalMessageURL {
+                arguments.insert(contentsOf: ["--output-last-message", finalMessageURL.path], at: arguments.count - 1)
+            }
+            return arguments
         }
     }
 
@@ -234,7 +251,7 @@ struct PromptHubMessage: Identifiable, Codable, Hashable {
 struct PromptCLIRun: Identifiable, Hashable {
     let id: UUID
     let tool: PromptCLITool
-    let prompt: String
+    var prompt: String
     let workingDirectory: URL
     let configuration: PromptRunConfiguration
     var status: PromptRunStatus
@@ -259,9 +276,13 @@ struct PromptCLIRun: Identifiable, Hashable {
     }
 
     var title: String {
-        let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = latestUserPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "Untitled prompt" }
         return trimmed.count > 52 ? String(trimmed.prefix(52)) + "..." : trimmed
+    }
+
+    var latestUserPrompt: String {
+        messages.last(where: { $0.role == .user })?.text ?? prompt
     }
 
     var statusLine: String {

@@ -56,6 +56,13 @@ final class PromptHubStore: ObservableObject {
         )
     }
 
+    var canSendPrompt: Bool {
+        let hasPrompt = !promptDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let hasCommand = availability[selectedToolID]?.isAvailable == true
+        let selectedRunIsIdle = selectedRun?.status != .running
+        return hasPrompt && hasCommand && selectedRunIsIdle
+    }
+
     func selectTool(_ toolID: PromptCLIToolID) {
         selectedToolID = toolID
         normalizeSelection(for: toolID)
@@ -84,6 +91,10 @@ final class PromptHubStore: ObservableObject {
         selectedRunID = nil
     }
 
+    func newConversation() {
+        selectedRunID = nil
+    }
+
     func refreshAvailability() {
         var refreshed: [PromptCLIToolID: PromptToolAvailability] = [:]
         for tool in tools {
@@ -98,17 +109,37 @@ final class PromptHubStore: ObservableObject {
 
         let tool = selectedTool
         let configuration = selectedConfiguration
-        let run = PromptCLIRun(
-            tool: tool,
-            prompt: prompt,
-            workingDirectory: resolvedWorkingDirectory(),
-            configuration: configuration
-        )
-
-        runs.insert(run, at: 0)
-        selectedRunID = run.id
+        let existingRunID = reusableSelectedRunID(for: tool.id)
         promptDraft = ""
-        start(runID: run.id, tool: tool, prompt: prompt, workingDirectory: run.workingDirectory, configuration: configuration)
+
+        if let existingRunID {
+            updateRun(existingRunID) { run in
+                run.prompt = prompt
+                run.messages.append(PromptHubMessage(role: .user, text: prompt))
+            }
+            selectedRunID = existingRunID
+            promoteRun(existingRunID)
+            guard let run = selectedRun else { return }
+            let executionPrompt = executionPrompt(for: run)
+            start(
+                runID: run.id,
+                tool: run.tool,
+                prompt: executionPrompt,
+                workingDirectory: run.workingDirectory,
+                configuration: run.configuration
+            )
+        } else {
+            let run = PromptCLIRun(
+                tool: tool,
+                prompt: prompt,
+                workingDirectory: resolvedWorkingDirectory(),
+                configuration: configuration
+            )
+
+            runs.insert(run, at: 0)
+            selectedRunID = run.id
+            start(runID: run.id, tool: tool, prompt: prompt, workingDirectory: run.workingDirectory, configuration: configuration)
+        }
     }
 
     func cancelSelectedRun() {
@@ -146,7 +177,7 @@ final class PromptHubStore: ObservableObject {
                 },
                 onTermination: { [weak self] status in
                     DispatchQueue.main.async {
-                        self?.finish(runID: runID, exitCode: status)
+                        self?.finish(runID: runID, termination: status)
                     }
                 }
             )
@@ -176,7 +207,7 @@ final class PromptHubStore: ObservableObject {
         updateRun(runID) { run in
             switch stream {
             case .stdout:
-                if let index = run.messages.lastIndex(where: { $0.role == .assistant }) {
+                if run.messages.last?.role == .assistant, let index = run.messages.indices.last {
                     run.messages[index].text += text
                 } else {
                     run.messages.append(PromptHubMessage(role: .assistant, text: text))
@@ -184,7 +215,7 @@ final class PromptHubStore: ObservableObject {
             case .stderr:
                 let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !trimmed.isEmpty else { return }
-                if let index = run.messages.lastIndex(where: { $0.role == .diagnostic }) {
+                if run.messages.last?.role == .diagnostic, let index = run.messages.indices.last {
                     run.messages[index].text += text
                 } else {
                     run.messages.append(PromptHubMessage(role: .diagnostic, text: text))
@@ -193,18 +224,24 @@ final class PromptHubStore: ObservableObject {
         }
     }
 
-    private func finish(runID: UUID, exitCode: Int32) {
+    private func finish(runID: UUID, termination: PromptCLITermination) {
         processes[runID] = nil
         updateRun(runID) { run in
             guard run.status == .running || run.status == .queued else { return }
-            run.exitCode = exitCode
+            run.exitCode = termination.status
             run.endedAt = Date()
-            run.status = exitCode == 0 ? .done : .failed
+            run.status = termination.status == 0 ? .done : .failed
+
+            if let finalMessage = termination.finalMessage {
+                run.messages.append(PromptHubMessage(role: .assistant, text: finalMessage))
+            }
 
             let hasAssistantOutput = run.messages.contains {
                 $0.role == .assistant && !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             }
-            if exitCode == 0 && !hasAssistantOutput {
+            if termination.status != 0, let diagnosticOutput = termination.diagnosticOutput {
+                run.messages.append(PromptHubMessage(role: .diagnostic, text: diagnosticOutput))
+            } else if termination.status == 0 && !hasAssistantOutput {
                 run.messages.append(
                     PromptHubMessage(
                         role: .diagnostic,
@@ -213,6 +250,50 @@ final class PromptHubStore: ObservableObject {
                 )
             }
         }
+    }
+
+    private func reusableSelectedRunID(for toolID: PromptCLIToolID) -> UUID? {
+        guard let selectedRunID,
+              processes[selectedRunID] == nil,
+              let run = runs.first(where: { $0.id == selectedRunID }),
+              run.tool.id == toolID,
+              run.status != .running
+        else {
+            return nil
+        }
+        return selectedRunID
+    }
+
+    private func promoteRun(_ runID: UUID) {
+        guard let index = runs.firstIndex(where: { $0.id == runID }), index != 0 else { return }
+        let run = runs.remove(at: index)
+        runs.insert(run, at: 0)
+    }
+
+    private func executionPrompt(for run: PromptCLIRun) -> String {
+        let chatMessages = run.messages.filter { $0.role == .user || $0.role == .assistant }
+        guard chatMessages.count > 1 else {
+            return run.latestUserPrompt
+        }
+
+        let transcript = chatMessages.map { message in
+            switch message.role {
+            case .user:
+                return "User: \(message.text)"
+            case .assistant:
+                return "Assistant: \(message.text)"
+            case .diagnostic:
+                return ""
+            }
+        }
+        .filter { !$0.isEmpty }
+        .joined(separator: "\n\n")
+
+        return """
+        Continue the following conversation. Use the earlier messages as context and answer only the latest user message. Do not repeat the transcript.
+
+        \(transcript)
+        """
     }
 
     private func updateRun(_ runID: UUID, mutate: (inout PromptCLIRun) -> Void) {

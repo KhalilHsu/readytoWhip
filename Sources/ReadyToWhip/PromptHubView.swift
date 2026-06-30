@@ -14,6 +14,13 @@ struct PromptHubView: View {
         .toolbar {
             ToolbarItemGroup {
                 Button {
+                    store.newConversation()
+                } label: {
+                    Image(systemName: "square.and.pencil")
+                }
+                .help("New conversation")
+
+                Button {
                     store.refreshAvailability()
                 } label: {
                     Image(systemName: "arrow.clockwise")
@@ -51,7 +58,7 @@ private struct PromptHubSidebar: View {
             }
 
             if !store.runs.isEmpty {
-                Section("Runs") {
+                Section("Chats") {
                     ForEach(store.runs) { run in
                         PromptRunRow(
                             run: run,
@@ -421,9 +428,7 @@ private struct PromptComposer: View {
     @ObservedObject var store: PromptHubStore
 
     private var canSend: Bool {
-        let hasPrompt = !store.promptDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        let hasCommand = store.availability[store.selectedToolID]?.isAvailable == true
-        return hasPrompt && hasCommand
+        store.canSendPrompt
     }
 
     var body: some View {
