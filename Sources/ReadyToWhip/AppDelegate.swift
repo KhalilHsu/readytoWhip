@@ -1,19 +1,36 @@
 import AppKit
+import OSLog
 import SwiftUI
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
+    private let logger = Logger(subsystem: "rip.readytowhip.activity", category: "AppDelegate")
     private let store = ActivityStore()
+    private let promptHubStore = PromptHubStore()
     private let petLibrary = PetLibrary()
     private var statusItem: NSStatusItem?
     private var panelController: FloatingPanelController?
     private var settingsWindow: NSWindow?
+    private var promptHubWindow: NSWindow?
+    private var didStartApplication = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        logger.info("applicationDidFinishLaunching")
+        startApplication()
+    }
+
+    func startApplication() {
+        guard !didStartApplication else { return }
+        didStartApplication = true
+        logger.info("startApplication")
         NSApp.setActivationPolicy(.accessory)
-        store.start()
         createMenuBarItem()
-        createFloatingPanel()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+            self?.showPromptHub()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
+            self?.showPromptHub()
+        }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
             self?.promptForScreenRecordingIfNeeded()
@@ -30,6 +47,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
         let menu = NSMenu()
         menu.addItem(NSMenuItem(title: "Show Widget", action: #selector(showWidget), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "Prompt Hub...", action: #selector(showPromptHub), keyEquivalent: "p"))
         menu.addItem(NSMenuItem(title: "Refresh", action: #selector(refresh), keyEquivalent: "r"))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Settings...", action: #selector(showSettings), keyEquivalent: ","))
@@ -40,17 +58,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     }
 
     private func createFloatingPanel() {
+        store.start()
         let controller = FloatingPanelController(store: store, petLibrary: petLibrary)
         controller.show()
         panelController = controller
     }
 
     @objc private func showWidget() {
-        panelController?.show()
+        if panelController == nil {
+            createFloatingPanel()
+        } else {
+            panelController?.show()
+        }
+    }
+
+    @objc private func showPromptHub() {
+        logger.info("showPromptHub begin existingWindow=\(self.promptHubWindow == nil ? "no" : "yes")")
+        if promptHubWindow == nil {
+            let view = PromptHubView(store: promptHubStore)
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 960, height: 680),
+                styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                backing: .buffered,
+                defer: false
+            )
+            window.isReleasedWhenClosed = false
+            window.title = "ReadyToWhip Prompt Hub"
+            window.contentView = NSHostingView(rootView: view)
+            window.minSize = NSSize(width: 860, height: 560)
+            window.center()
+            promptHubWindow = window
+            logger.info("showPromptHub created window")
+        }
+
+        promptHubStore.refreshAvailability()
+        promptHubWindow?.makeKeyAndOrderFront(nil)
+        promptHubWindow?.orderFrontRegardless()
+        NSApp.activate(ignoringOtherApps: true)
+        NSRunningApplication.current.activate(options: [.activateAllWindows])
+        logger.info("showPromptHub ordered window")
     }
 
     @objc private func refresh() {
         store.refresh()
+        promptHubStore.refreshAvailability()
     }
 
     @objc private func showSettings() {

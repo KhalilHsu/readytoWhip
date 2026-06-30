@@ -2,19 +2,32 @@ import AppKit
 import SwiftUI
 
 @MainActor
+private final class SpriteSheetAsset: NSObject {
+    let cgImage: CGImage
+    let imageSize: CGSize
+
+    init(cgImage: CGImage, imageSize: CGSize) {
+        self.cgImage = cgImage
+        self.imageSize = imageSize
+    }
+}
+
+@MainActor
 private final class SpriteSheetCache {
     static let shared = SpriteSheetCache()
-    private let cache = NSCache<NSURL, NSImage>()
+    private let cache = NSCache<NSURL, SpriteSheetAsset>()
 
-    func image(for url: URL) -> NSImage? {
+    func asset(for url: URL) -> SpriteSheetAsset? {
         if let cached = cache.object(forKey: url as NSURL) {
             return cached
         }
-        guard let image = NSImage(contentsOf: url) else {
+        guard let image = NSImage(contentsOf: url),
+              let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
             return nil
         }
-        cache.setObject(image, forKey: url as NSURL)
-        return image
+        let asset = SpriteSheetAsset(cgImage: cgImage, imageSize: image.size)
+        cache.setObject(asset, forKey: url as NSURL)
+        return asset
     }
 }
 
@@ -142,21 +155,20 @@ private struct SpriteSheetPetView: View {
     }
 
     private func croppedSpriteFrame() -> NSImage? {
-        guard let image = SpriteSheetCache.shared.image(for: spriteSheetURL),
-              let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil)
-        else {
+        guard let asset = SpriteSheetCache.shared.asset(for: spriteSheetURL) else {
             return nil
         }
 
         let frameSize = pack.framePixelSize
         guard frameSize.width > 0, frameSize.height > 0 else { return nil }
+        let cgImage = asset.cgImage
 
         let row = pack.spriteRows[state] ?? 0
         let frameCount = max(1, pack.framesPerState[state] ?? 1)
         let frameIndex = Int(timestamp * animationRate).quotientAndRemainder(dividingBy: frameCount).remainder
 
-        let scaleX = CGFloat(cgImage.width) / image.size.width
-        let scaleY = CGFloat(cgImage.height) / image.size.height
+        let scaleX = CGFloat(cgImage.width) / asset.imageSize.width
+        let scaleY = CGFloat(cgImage.height) / asset.imageSize.height
 
         let rect = CGRect(
             x: CGFloat(frameIndex) * frameSize.width * scaleX,

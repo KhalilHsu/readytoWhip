@@ -29,7 +29,7 @@ The MVP uses dedicated task-state adapters for each supported tool:
 ReadyToWhip features an animated mascot that reflects your current AI activity state.
 
 - The pet reacts to `Working`, `Waiting`, `Done`, and `Failed` states.
-- Includes built-in pets (Whippy, Miso, Pico) using procedural rendering.
+- Includes built-in pets (Whippy, Miso, Pico, kunkun), with kunkun bundled from a sprite sheet.
 - Supports custom community pets via sprite sheets and `pet.json` manifests.
 - Custom pets can be added by dropping them into `~/Library/Application Support/ReadyToWhip/Pets`.
 

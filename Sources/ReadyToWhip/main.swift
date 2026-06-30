@@ -10,9 +10,7 @@ if CommandLine.arguments.contains("--dump-activities") {
     exit(0)
 }
 
-// 强制创建一个 AppDelegate 实例并保持引用
 let delegate = AppDelegate()
 NSApplication.shared.delegate = delegate
-
 NSApp.setActivationPolicy(.accessory)
 _ = NSApplicationMain(CommandLine.argc, CommandLine.unsafeArgv)

@@ -11,7 +11,7 @@ TARGET_APP="/Applications/$APP_NAME.app"
 pkill -x "$APP_NAME" 2>/dev/null || true
 rm -rf "$TARGET_APP"
 cp -R "$BUILT_APP" "$TARGET_APP"
-defaults write rip.readytowhip.activity selectedPetID -string kunkun
-open "$TARGET_APP"
+defaults write rip.readytowhip.activity selectedPetID -string whippy
+nohup "$TARGET_APP/Contents/MacOS/$APP_NAME" >/dev/null 2>&1 &
 
 echo "$TARGET_APP"

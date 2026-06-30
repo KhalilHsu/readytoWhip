@@ -52,8 +52,7 @@ final class PetLibrary: ObservableObject {
     }
 
     func reload() {
-        let discovered = Self.builtInPacks() + Self.loadExternalPacks()
-        packs = discovered
+        packs = Self.mergePacks(builtIn: Self.builtInPacks(), external: Self.loadExternalPacks())
         if !packs.contains(where: { $0.id == selectedPetID }) {
             selectedPetID = packs.first(where: { $0.id == "kunkun" })?.id ?? packs.first?.id ?? "whippy"
         }
@@ -128,8 +127,32 @@ final class PetLibrary: ObservableObject {
                 framePixelSize: CGSize(width: 192, height: 208),
                 spriteRows: Self.defaultSpriteRows,
                 framesPerState: Self.defaultFramesPerState
+            ),
+            PetPackManifest(
+                id: "kunkun",
+                displayName: "kunkun",
+                creatorName: "Codex Pets",
+                summary: "A bundled chibi pet with a clapping hover animation.",
+                renderMode: Self.kunkunSpriteSheetURL == nil ? .generated : .spriteSheet,
+                accentColor: NSColor(red: 0.48, green: 0.43, blue: 0.98, alpha: 1),
+                secondaryColor: NSColor(red: 0.14, green: 0.13, blue: 0.25, alpha: 1),
+                highlightColor: NSColor(red: 0.96, green: 0.94, blue: 0.81, alpha: 1),
+                sourceURL: nil,
+                previewImageURL: nil,
+                spriteSheetURL: Self.kunkunSpriteSheetURL,
+                framePixelSize: CGSize(width: 192, height: 208),
+                spriteRows: Self.defaultSpriteRows,
+                framesPerState: Self.defaultFramesPerState
             )
         ]
+    }
+
+    private static var kunkunSpriteSheetURL: URL? {
+        Bundle.module.url(
+            forResource: "spritesheet",
+            withExtension: "webp",
+            subdirectory: "BuiltInPets/kunkun"
+        )
     }
 
     private static func loadExternalPacks() -> [PetPackManifest] {
@@ -153,6 +176,23 @@ final class PetLibrary: ObservableObject {
 
         return Array(discovered.values)
             .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+    }
+
+    private static func mergePacks(builtIn: [PetPackManifest], external: [PetPackManifest]) -> [PetPackManifest] {
+        var seen: Set<String> = []
+        var merged: [PetPackManifest] = []
+
+        for pack in builtIn {
+            guard seen.insert(pack.id).inserted else { continue }
+            merged.append(pack)
+        }
+
+        for pack in external {
+            guard seen.insert(pack.id).inserted else { continue }
+            merged.append(pack)
+        }
+
+        return merged
     }
 
     private static func migrateLegacyPacksIfNeeded(into directory: URL) {
