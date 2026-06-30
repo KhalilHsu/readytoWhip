@@ -58,6 +58,7 @@ struct PromptCLITool: Identifiable, Hashable {
         workingDirectory: URL,
         configuration: PromptRunConfiguration,
         finalMessageURL: URL?,
+        logFileURL: URL?,
         nativeSessionID: String?
     ) -> [String] {
         switch id {
@@ -66,8 +67,15 @@ struct PromptCLITool: Identifiable, Hashable {
                 "--model", agyModelArgument(configuration: configuration),
                 "--print", prompt
             ]
-            if nativeSessionID != nil {
-                arguments.insert("--continue", at: 0)
+            if let logFileURL {
+                arguments.insert(contentsOf: ["--log-file", logFileURL.path], at: 0)
+            }
+            if let nativeSessionID {
+                if nativeSessionID == "last" {
+                    arguments.insert("--continue", at: 0)
+                } else {
+                    arguments.insert(contentsOf: ["--conversation", nativeSessionID], at: 0)
+                }
             }
             return arguments
         case .codex:

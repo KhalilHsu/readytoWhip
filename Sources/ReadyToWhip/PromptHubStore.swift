@@ -237,8 +237,6 @@ final class PromptHubStore: ObservableObject {
             }
             if let nativeSessionID = termination.nativeSessionID {
                 run.nativeSessionID = nativeSessionID
-            } else if run.tool.id == .antigravity && termination.status == 0 {
-                run.nativeSessionID = "last"
             }
 
             let hasAssistantOutput = run.messages.contains {

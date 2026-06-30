@@ -82,14 +82,19 @@ final class PromptCLIRunner {
         }
 
         let finalMessageURL = tool.capturesFinalMessage ? makeFinalMessageURL() : nil
+        let logFileURL = tool.id == .antigravity ? makeLogFileURL() : nil
         if let finalMessageURL {
             try? fileManager.removeItem(at: finalMessageURL)
+        }
+        if let logFileURL {
+            try? fileManager.removeItem(at: logFileURL)
         }
         let arguments = tool.arguments(
             prompt: prompt,
             workingDirectory: workingDirectory,
             configuration: configuration,
             finalMessageURL: finalMessageURL,
+            logFileURL: logFileURL,
             nativeSessionID: nativeSessionID
         )
         let process = Process()
@@ -135,12 +140,22 @@ final class PromptCLIRunner {
                 try? FileManager.default.removeItem(at: url)
                 return text.trimmingCharacters(in: .whitespacesAndNewlines).nilIfBlank
             }
+            let logOutput = logFileURL.flatMap { url -> String? in
+                guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+                try? FileManager.default.removeItem(at: url)
+                return text.nilIfBlank
+            }
+            let diagnosticOutput = outputCapture.diagnosticOutput()
+            let nativeSessionOutput = [diagnosticOutput, logOutput]
+                .compactMap { $0?.nilIfBlank }
+                .joined(separator: "\n")
+                .nilIfBlank
             onTermination(
                 PromptCLITermination(
                     status: finishedProcess.terminationStatus,
                     finalMessage: finalMessage,
-                    diagnosticOutput: outputCapture.diagnosticOutput(),
-                    nativeSessionID: nativeSessionID ?? Self.extractNativeSessionID(from: outputCapture.diagnosticOutput())
+                    diagnosticOutput: diagnosticOutput,
+                    nativeSessionID: nativeSessionID ?? Self.extractNativeSessionID(from: nativeSessionOutput)
                 )
             )
         }
@@ -229,6 +244,11 @@ final class PromptCLIRunner {
             .appendingPathComponent("readytowhip-\(UUID().uuidString)-last-message.txt")
     }
 
+    private func makeLogFileURL() -> URL {
+        fileManager.temporaryDirectory
+            .appendingPathComponent("readytowhip-\(UUID().uuidString)-cli.log")
+    }
+
     private func commandPreview(executablePath: String, arguments: [String]) -> String {
         ([executablePath] + arguments).map(Self.shellQuoted).joined(separator: " ")
     }
@@ -250,7 +270,7 @@ final class PromptCLIRunner {
 
     private static func extractNativeSessionID(from output: String?) -> String? {
         guard let output else { return nil }
-        let pattern = #"session id:\s*([0-9a-fA-F-]{36})"#
+        let pattern = #"(?:session id:|Created conversation|Print mode: conversation=)\s*([0-9a-fA-F-]{36})"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
         let range = NSRange(output.startIndex..<output.endIndex, in: output)
         guard let match = regex.firstMatch(in: output, range: range),
