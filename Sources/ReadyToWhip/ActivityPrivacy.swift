@@ -1,12 +1,7 @@
 import Foundation
 
 enum ActivityPrivacy {
-    private static let sensitiveKeywords = [
-        "bytedance",
-        "字节",
-        "feishu",
-        "lark"
-    ]
+    private static let sensitiveKeywords = loadSensitiveKeywords()
 
     static func redactedProjectName(_ text: String?) -> String? {
         guard let normalized = normalizedText(text) else { return nil }
@@ -84,14 +79,59 @@ enum ActivityPrivacy {
         )
 
         for keyword in sensitiveKeywords {
+            let pattern = NSRegularExpression.escapedPattern(for: keyword)
             redacted = redacted.replacingOccurrences(
-                of: keyword,
+                of: pattern,
                 with: "[REDACTED]",
                 options: [.caseInsensitive, .regularExpression]
             )
         }
 
         return redacted
+    }
+
+    private static func loadSensitiveKeywords() -> [String] {
+        var values: [String] = []
+
+        if let environmentValue = ProcessInfo.processInfo.environment["READYTOWHIP_REDACTION_KEYWORDS"] {
+            values.append(contentsOf: parseKeywordList(environmentValue))
+        }
+
+        for url in privacyKeywordFileURLs() {
+            guard let text = try? String(contentsOf: url, encoding: .utf8) else {
+                continue
+            }
+            values.append(contentsOf: parseKeywordList(text))
+        }
+
+        var seen = Set<String>()
+        return values.filter { keyword in
+            let key = keyword.lowercased()
+            guard !seen.contains(key) else {
+                return false
+            }
+            seen.insert(key)
+            return true
+        }
+    }
+
+    private static func parseKeywordList(_ value: String) -> [String] {
+        value
+            .components(separatedBy: CharacterSet(charactersIn: ",\n"))
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    private static func privacyKeywordFileURLs() -> [URL] {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        return [
+            home
+                .appendingPathComponent("Library/Application Support/ReadyToWhip", isDirectory: true)
+                .appendingPathComponent("privacy-keywords.txt"),
+            home
+                .appendingPathComponent(".config/readytowhip", isDirectory: true)
+                .appendingPathComponent("privacy-keywords.txt")
+        ]
     }
 
     private static func projectLikeComponent(from text: String?) -> String? {

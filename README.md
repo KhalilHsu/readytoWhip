@@ -53,6 +53,19 @@ swift run ReadyToWhip --dump-activities
 
 `--dump-activities` now redacts local paths, long titles, usernames, and command arguments by default.
 
+Optional local redaction keywords can be configured without changing source code:
+
+```bash
+export READYTOWHIP_REDACTION_KEYWORDS="private-project,internal-client"
+```
+
+You can also store one keyword per line, or comma-separated keywords, in either local file:
+
+```text
+~/Library/Application Support/ReadyToWhip/privacy-keywords.txt
+~/.config/readytowhip/privacy-keywords.txt
+```
+
 Use raw output only for local debugging:
 
 ```bash
