@@ -16,6 +16,7 @@ struct PromptCLITermination {
     let status: Int32
     let finalMessage: String?
     let diagnosticOutput: String?
+    let nativeSessionID: String?
 }
 
 private final class PromptOutputCapture: @unchecked Sendable {
@@ -72,6 +73,7 @@ final class PromptCLIRunner {
         prompt: String,
         workingDirectory: URL,
         configuration: PromptRunConfiguration,
+        nativeSessionID: String?,
         onOutput: @escaping @Sendable (PromptOutputStream, String) -> Void,
         onTermination: @escaping @Sendable (PromptCLITermination) -> Void
     ) throws -> PromptCLIProcessLaunch {
@@ -87,7 +89,8 @@ final class PromptCLIRunner {
             prompt: prompt,
             workingDirectory: workingDirectory,
             configuration: configuration,
-            finalMessageURL: finalMessageURL
+            finalMessageURL: finalMessageURL,
+            nativeSessionID: nativeSessionID
         )
         let process = Process()
         process.executableURL = executableURL
@@ -136,7 +139,8 @@ final class PromptCLIRunner {
                 PromptCLITermination(
                     status: finishedProcess.terminationStatus,
                     finalMessage: finalMessage,
-                    diagnosticOutput: outputCapture.diagnosticOutput()
+                    diagnosticOutput: outputCapture.diagnosticOutput(),
+                    nativeSessionID: nativeSessionID ?? Self.extractNativeSessionID(from: outputCapture.diagnosticOutput())
                 )
             )
         }
@@ -242,5 +246,18 @@ final class PromptCLIRunner {
             with: "",
             options: .regularExpression
         )
+    }
+
+    private static func extractNativeSessionID(from output: String?) -> String? {
+        guard let output else { return nil }
+        let pattern = #"session id:\s*([0-9a-fA-F-]{36})"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        let range = NSRange(output.startIndex..<output.endIndex, in: output)
+        guard let match = regex.firstMatch(in: output, range: range),
+              let idRange = Range(match.range(at: 1), in: output)
+        else {
+            return nil
+        }
+        return String(output[idRange])
     }
 }

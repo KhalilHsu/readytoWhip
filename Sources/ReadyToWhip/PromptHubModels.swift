@@ -49,30 +49,47 @@ struct PromptCLITool: Identifiable, Hashable {
         id != .codex
     }
 
+    var supportsNativeContinuation: Bool {
+        true
+    }
+
     func arguments(
         prompt: String,
         workingDirectory: URL,
         configuration: PromptRunConfiguration,
-        finalMessageURL: URL?
+        finalMessageURL: URL?,
+        nativeSessionID: String?
     ) -> [String] {
         switch id {
         case .antigravity:
-            return [
+            var arguments = [
                 "--model", agyModelArgument(configuration: configuration),
                 "--print", prompt
             ]
+            if nativeSessionID != nil {
+                arguments.insert("--continue", at: 0)
+            }
+            return arguments
         case .codex:
-            var arguments = [
-                "exec",
-                "--ignore-user-config",
+            let baseOptions = [
                 "-m", configuration.modelID,
                 "-c", "model_reasoning_effort=\(configuration.reasoningID)",
-                "--cd", workingDirectory.path,
-                "--skip-git-repo-check",
-                "--sandbox", "read-only",
-                "--color", "never",
-                prompt
+                "-c", "sandbox_mode=workspace-write",
+                "--skip-git-repo-check"
             ]
+            var arguments: [String]
+            if let nativeSessionID {
+                arguments = ["exec", "resume"] + baseOptions + [nativeSessionID, prompt]
+            } else {
+                arguments = [
+                    "exec"
+                ] + baseOptions + [
+                    "--cd", workingDirectory.path,
+                    "--sandbox", "workspace-write",
+                    "--color", "never",
+                    prompt
+                ]
+            }
             if let finalMessageURL {
                 arguments.insert(contentsOf: ["--output-last-message", finalMessageURL.path], at: arguments.count - 1)
             }
@@ -261,6 +278,7 @@ struct PromptCLIRun: Identifiable, Hashable {
     var exitCode: Int32?
     var resolvedExecutablePath: String?
     var commandPreview: String?
+    var nativeSessionID: String?
 
     init(tool: PromptCLITool, prompt: String, workingDirectory: URL, configuration: PromptRunConfiguration) {
         self.id = UUID()

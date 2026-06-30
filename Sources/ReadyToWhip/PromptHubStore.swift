@@ -120,11 +120,10 @@ final class PromptHubStore: ObservableObject {
             selectedRunID = existingRunID
             promoteRun(existingRunID)
             guard let run = selectedRun else { return }
-            let executionPrompt = executionPrompt(for: run)
             start(
                 runID: run.id,
                 tool: run.tool,
-                prompt: executionPrompt,
+                prompt: prompt,
                 workingDirectory: run.workingDirectory,
                 configuration: run.configuration
             )
@@ -170,6 +169,7 @@ final class PromptHubStore: ObservableObject {
                 prompt: prompt,
                 workingDirectory: workingDirectory,
                 configuration: configuration,
+                nativeSessionID: nativeSessionID(for: runID),
                 onOutput: { [weak self] stream, text in
                     DispatchQueue.main.async {
                         self?.appendOutput(text, stream: stream, to: runID)
@@ -235,6 +235,11 @@ final class PromptHubStore: ObservableObject {
             if let finalMessage = termination.finalMessage {
                 run.messages.append(PromptHubMessage(role: .assistant, text: finalMessage))
             }
+            if let nativeSessionID = termination.nativeSessionID {
+                run.nativeSessionID = nativeSessionID
+            } else if run.tool.id == .antigravity && termination.status == 0 {
+                run.nativeSessionID = "last"
+            }
 
             let hasAssistantOutput = run.messages.contains {
                 $0.role == .assistant && !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -270,30 +275,13 @@ final class PromptHubStore: ObservableObject {
         runs.insert(run, at: 0)
     }
 
-    private func executionPrompt(for run: PromptCLIRun) -> String {
-        let chatMessages = run.messages.filter { $0.role == .user || $0.role == .assistant }
-        guard chatMessages.count > 1 else {
-            return run.latestUserPrompt
+    private func nativeSessionID(for runID: UUID) -> String? {
+        guard let run = runs.first(where: { $0.id == runID }),
+              run.tool.supportsNativeContinuation
+        else {
+            return nil
         }
-
-        let transcript = chatMessages.map { message in
-            switch message.role {
-            case .user:
-                return "User: \(message.text)"
-            case .assistant:
-                return "Assistant: \(message.text)"
-            case .diagnostic:
-                return ""
-            }
-        }
-        .filter { !$0.isEmpty }
-        .joined(separator: "\n\n")
-
-        return """
-        Continue the following conversation. Use the earlier messages as context and answer only the latest user message. Do not repeat the transcript.
-
-        \(transcript)
-        """
+        return run.nativeSessionID
     }
 
     private func updateRun(_ runID: UUID, mutate: (inout PromptCLIRun) -> Void) {
